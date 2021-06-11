@@ -5,10 +5,21 @@
     {
       "type": "object",
       "required": [
-        "get_count"
+        "accepted_token_available"
       ],
       "properties": {
-        "get_count": {
+        "accepted_token_available": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
           "type": "object"
         }
       }

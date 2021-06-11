@@ -3,25 +3,49 @@
   "title": "State",
   "type": "object",
   "required": [
-    "count",
-    "owner"
+    "accepted_token",
+    "admin",
+    "contract_address",
+    "viewing_key",
+    "withdrawal_allowed_from"
   ],
   "properties": {
-    "count": {
-      "type": "integer",
-      "format": "int32"
+    "accepted_token": {
+      "$ref": "#/definitions/SecretContract"
     },
-    "owner": {
-      "$ref": "#/definitions/CanonicalAddr"
+    "admin": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "contract_address": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "viewing_key": {
+      "type": "string"
+    },
+    "withdrawal_allowed_from": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     }
   },
   "definitions": {
-    "Binary": {
-      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+    "HumanAddr": {
       "type": "string"
     },
-    "CanonicalAddr": {
-      "$ref": "#/definitions/Binary"
+    "SecretContract": {
+      "type": "object",
+      "required": [
+        "address",
+        "contract_hash"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "contract_hash": {
+          "type": "string"
+        }
+      }
     }
   }
 }

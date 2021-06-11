@@ -1,8 +1,12 @@
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
+use crate::msg::{BalanceResponse, ConfigResponse, HandleMsg, InitMsg, QueryMsg};
 use crate::state::{config, config_read, State};
 use cosmwasm_std::{
-    to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, Querier, StdResult, Storage,
+    to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
+    StdResult, Storage,
 };
+use secret_toolkit::snip20;
+
+pub const RESPONSE_BLOCK_SIZE: usize = 256;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -10,15 +14,37 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let state = State {
-        accepted_token: msg.accepted_token,
+        accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
-        viewing_key: msg.viewing_key,
+        contract_address: env.contract.address,
+        viewing_key: msg.viewing_key.clone(),
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
 
     config(&mut deps.storage).save(&state)?;
 
-    Ok(InitResponse::default())
+    // https://github.com/enigmampc/secret-toolkit/tree/master/packages/snip20
+    let messages = vec![
+        snip20::register_receive_msg(
+            env.contract_code_hash.clone(),
+            None,
+            1,
+            msg.accepted_token.contract_hash.clone(),
+            msg.accepted_token.address.clone(),
+        )?,
+        snip20::set_viewing_key_msg(
+            msg.viewing_key,
+            None,
+            RESPONSE_BLOCK_SIZE,
+            msg.accepted_token.contract_hash,
+            msg.accepted_token.address,
+        )?,
+    ];
+
+    Ok(InitResponse {
+        messages,
+        log: vec![],
+    })
 }
 
 pub fn handle<S: Storage, A: Api, Q: Querier>(
@@ -34,8 +60,26 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
+        QueryMsg::AcceptedTokenAvailable {} => to_binary(&accepted_token_available(deps)?),
         QueryMsg::Config {} => to_binary(&public_config(deps)?),
     }
+}
+
+fn accepted_token_available<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<BalanceResponse> {
+    let state = config_read(&deps.storage).load()?;
+    let balance = snip20::balance_query(
+        &deps.querier,
+        state.contract_address,
+        state.viewing_key,
+        RESPONSE_BLOCK_SIZE,
+        state.accepted_token.contract_hash,
+        state.accepted_token.address,
+    )?;
+    Ok(BalanceResponse {
+        amount: balance.amount,
+    })
 }
 
 fn public_config<S: Storage, A: Api, Q: Querier>(
@@ -55,7 +99,6 @@ mod tests {
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::HumanAddr;
 
     pub const MOCK_ADMIN: &str = "admin";
     pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "sefismartcontractaddress";

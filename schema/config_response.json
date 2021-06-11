@@ -1,18 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "InitMsg",
+  "title": "ConfigResponse",
   "type": "object",
   "required": [
     "accepted_token",
-    "viewing_key",
+    "admin",
     "withdrawal_allowed_from"
   ],
   "properties": {
     "accepted_token": {
       "$ref": "#/definitions/SecretContract"
     },
-    "viewing_key": {
-      "type": "string"
+    "admin": {
+      "$ref": "#/definitions/HumanAddr"
     },
     "withdrawal_allowed_from": {
       "type": "integer",

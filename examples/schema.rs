@@ -3,8 +3,10 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use timelock_withdrawal_smart_contract::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg};
-use timelock_withdrawal_smart_contract::state::State;
+use cw_timelock_withdrawal_smart_contract::msg::{
+    BalanceResponse, ConfigResponse, HandleMsg, InitMsg, QueryMsg,
+};
+use cw_timelock_withdrawal_smart_contract::state::State;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();
@@ -16,5 +18,6 @@ fn main() {
     export_schema(&schema_for!(HandleMsg), &out_dir);
     export_schema(&schema_for!(QueryMsg), &out_dir);
     export_schema(&schema_for!(State), &out_dir);
-    export_schema(&schema_for!(CountResponse), &out_dir);
+    export_schema(&schema_for!(BalanceResponse), &out_dir);
+    export_schema(&schema_for!(ConfigResponse), &out_dir);
 }
