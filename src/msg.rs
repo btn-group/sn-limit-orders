@@ -13,6 +13,10 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
+    ChangeAdmin {
+        address: HumanAddr,
+        padding: Option<String>,
+    },
     Receive {
         sender: HumanAddr,
         from: HumanAddr,
