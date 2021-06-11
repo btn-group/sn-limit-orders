@@ -19,6 +19,7 @@ pub enum HandleMsg {
         amount: Uint128,
         msg: Binary,
     },
+    Withdraw {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

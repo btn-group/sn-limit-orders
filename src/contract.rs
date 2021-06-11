@@ -56,6 +56,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
+        HandleMsg::Withdraw {} => withdraw(deps, env),
     }
 }
 
@@ -115,6 +116,42 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
+fn withdraw<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let state = config_read(&deps.storage).load()?;
+    // Ensure that admin is calling this
+    if env.message.sender != state.admin {
+        return Err(StdError::Unauthorized { backtrace: None });
+    }
+
+    // Ensure that the current time is after the withdrawal_allowed_from
+    if env.block.time < state.withdrawal_allowed_from {
+        return Err(StdError::generic_err(format!(
+            "Withdrawal not allowed yet. Withdrawal allowed from: {}, current time: {}",
+            state.withdrawal_allowed_from, env.block.time
+        )));
+    }
+
+    let amount_of_accepted_token_to_send = accepted_token_available(deps)?.amount;
+    // Transfer accepted token to admin
+    let messages = vec![snip20::transfer_msg(
+        state.admin,
+        amount_of_accepted_token_to_send,
+        None,
+        RESPONSE_BLOCK_SIZE,
+        state.accepted_token.contract_hash,
+        state.accepted_token.address,
+    )?];
+
+    Ok(HandleResponse {
+        messages,
         log: vec![],
         data: None,
     })
@@ -212,5 +249,42 @@ mod tests {
             msg.clone(),
         );
         handle_response.unwrap();
+    }
+
+    #[test]
+    fn test_withdraw() {
+        let (_init_result, mut deps) = init_helper();
+        let msg = HandleMsg::Withdraw {};
+        let env_block_time = mock_env("anyone", &[]).block.time;
+
+        // It raises an error when non-admin calls it
+        let handle_response = handle(&mut deps, mock_env("anyone", &[]), msg.clone());
+        assert_eq!(
+            handle_response.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // It raises an error when admin calls this too early
+        let mut state = config_read(&deps.storage).load().unwrap();
+        state.withdrawal_allowed_from = env_block_time + 3;
+        config(&mut deps.storage).save(&state).unwrap();
+        let handle_response = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), msg.clone());
+        assert_eq!(
+            handle_response.unwrap_err(),
+            StdError::generic_err(format!(
+                "Withdrawal not allowed yet. Withdrawal allowed from: {}, current time: {}",
+                state.withdrawal_allowed_from, env_block_time
+            )),
+        );
+
+        // Test that a request is sent to the offered token contract address to transfer tokens to admin
+        let mut state = config_read(&deps.storage).load().unwrap();
+        state.withdrawal_allowed_from = env_block_time - 3;
+        config(&mut deps.storage).save(&state).unwrap();
+        let handle_response = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), msg.clone());
+        assert_eq!(
+            handle_response.unwrap_err(),
+            StdError::generic_err(format!("Error performing Balance query: Generic error: Querier system error: No such contract: {}", MOCK_ACCEPTED_TOKEN_ADDRESS)),
+        );
     }
 }
