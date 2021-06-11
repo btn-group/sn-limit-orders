@@ -2,7 +2,7 @@ use crate::msg::{BalanceResponse, ConfigResponse, HandleMsg, InitMsg, QueryMsg};
 use crate::state::{config, config_read, State};
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
-    StdResult, Storage,
+    StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 
@@ -48,11 +48,15 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
-    match msg {}
+    match msg {
+        HandleMsg::Receive {
+            from, amount, msg, ..
+        } => receive(deps, env, from, amount, msg),
+    }
 }
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -93,9 +97,33 @@ fn public_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn receive<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    _from: HumanAddr,
+    _amount: Uint128,
+    _msg: Binary,
+) -> StdResult<HandleResponse> {
+    // Ensure that the sent tokens are from an expected contract address
+    let state = config_read(&deps.storage).load()?;
+    if env.message.sender != state.accepted_token.address {
+        return Err(StdError::generic_err(format!(
+            "This token is not supported. Supported: {}, given: {}",
+            state.accepted_token.address, env.message.sender
+        )));
+    }
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::msg::ReceiveMsg;
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
@@ -143,5 +171,46 @@ mod tests {
             },
             value
         );
+    }
+
+    #[test]
+    fn test_receive_accepted_token_callback() {
+        let (_init_result, mut deps) = init_helper();
+        let amount: Uint128 = Uint128(333);
+        let from: HumanAddr = HumanAddr::from("someuser");
+
+        // Test that only accepted token is accepted
+        // Not accepted token
+        let msg = HandleMsg::Receive {
+            amount: amount,
+            from: from.clone(),
+            sender: from.clone(),
+            msg: to_binary(&ReceiveMsg::Deposit {}).unwrap(),
+        };
+        let handle_response = handle(&mut deps, mock_env("notasupportedtoken", &[]), msg.clone());
+        assert_eq!(
+            handle_response.unwrap_err(),
+            StdError::GenericErr {
+                msg: format!(
+                    "This token is not supported. Supported: {}, given: {}",
+                    MOCK_ACCEPTED_TOKEN_ADDRESS, "notasupportedtoken"
+                ),
+                backtrace: None
+            }
+        );
+
+        // Accepted token
+        let msg = HandleMsg::Receive {
+            amount: amount,
+            from: from.clone(),
+            sender: from,
+            msg: to_binary(&ReceiveMsg::Deposit {}).unwrap(),
+        };
+        let handle_response = handle(
+            &mut deps,
+            mock_env(MOCK_ACCEPTED_TOKEN_ADDRESS, &[]),
+            msg.clone(),
+        );
+        handle_response.unwrap();
     }
 }
