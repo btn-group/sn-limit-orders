@@ -1,3 +1,4 @@
+use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use crate::state::Config;
@@ -39,6 +40,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::Enable {} => enable(deps, env),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -77,6 +79,23 @@ pub fn correct_amount_of_token(
     }
 
     Ok(())
+}
+
+fn enable<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut config: Config = config_store.load(CONFIG_KEY)?;
+    authorize(env.message.sender, config.admin.clone())?;
+
+    config.enabled = true;
+    config_store.store(CONFIG_KEY, &config)?;
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
@@ -182,12 +201,39 @@ mod tests {
         assert_eq!(
             Config {
                 accepted_token: accepted_token,
-                butt: mock_butt(),
                 admin: HumanAddr::from(MOCK_ADMIN),
+                butt: mock_butt(),
+                enabled: false,
                 withdrawal_allowed_from: 3
             },
             value
         );
+    }
+
+    #[test]
+    fn test_enable() {
+        let (_init_result, mut deps) = init_helper();
+
+        // Initially false
+        let mut res = query(&deps, QueryMsg::Config {}).unwrap();
+        let mut config: Config = from_binary(&res).unwrap();
+        assert_eq!(false, config.enabled);
+
+        let msg = HandleMsg::Enable {};
+        // when called by a non admin
+        // * it raises an error
+        let handle_response = handle(&mut deps, mock_env("non-admin", &[]), msg.clone());
+        assert_eq!(
+            handle_response.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when called by the admin
+        handle(&mut deps, mock_env(config.admin, &[]), msg.clone()).unwrap();
+        // * it enables the contract
+        res = query(&deps, QueryMsg::Config {}).unwrap();
+        config = from_binary(&res).unwrap();
+        assert_eq!(true, config.enabled);
     }
 
     #[test]
