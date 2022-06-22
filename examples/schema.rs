@@ -1,12 +1,10 @@
-use std::env::current_dir;
-use std::fs::create_dir_all;
-
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-
-use cw_timelock_withdrawal_smart_contract::msg::{
+use cw_secret_network_escrow_trade_smart_contract::msg::{
     BalanceResponse, ConfigResponse, HandleMsg, InitMsg, QueryMsg,
 };
-use cw_timelock_withdrawal_smart_contract::state::State;
+use cw_secret_network_escrow_trade_smart_contract::state::State;
+use std::env::current_dir;
+use std::fs::create_dir_all;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();

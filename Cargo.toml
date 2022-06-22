@@ -1,5 +1,5 @@
 [package]
-name = "cw-timelock-withdrawal-smart-contract"
+name = "cw-secret-network-escrow-trade-smart-contract"
 version = "0.1.0"
 authors = ["Steven Chang <steven.chang@btn.group>"]
 edition = "2018"
