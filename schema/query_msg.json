@@ -5,17 +5,6 @@
     {
       "type": "object",
       "required": [
-        "accepted_token_available"
-      ],
-      "properties": {
-        "accepted_token_available": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
         "config"
       ],
       "properties": {

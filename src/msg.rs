@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub struct InitMsg {
     pub accepted_token: SecretContract,
     pub butt: SecretContract,
-    pub viewing_key: String,
     pub withdrawal_allowed_from: u64,
 }
 
@@ -24,13 +23,11 @@ pub enum HandleMsg {
         amount: Uint128,
         msg: Binary,
     },
-    Withdraw {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
-    AcceptedTokenAvailable {},
     Config {},
 }
 

@@ -5,7 +5,6 @@
   "required": [
     "accepted_token",
     "butt",
-    "viewing_key",
     "withdrawal_allowed_from"
   ],
   "properties": {
@@ -14,9 +13,6 @@
     },
     "butt": {
       "$ref": "#/definitions/SecretContract"
-    },
-    "viewing_key": {
-      "type": "string"
     },
     "withdrawal_allowed_from": {
       "type": "integer",

@@ -17,7 +17,6 @@ pub struct State {
     pub admin: HumanAddr,
     pub butt: SecretContract,
     pub contract_address: HumanAddr,
-    pub viewing_key: String,
     pub withdrawal_allowed_from: u64,
 }
 

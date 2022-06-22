@@ -7,7 +7,6 @@
     "admin",
     "butt",
     "contract_address",
-    "viewing_key",
     "withdrawal_allowed_from"
   ],
   "properties": {
@@ -22,9 +21,6 @@
     },
     "contract_address": {
       "$ref": "#/definitions/HumanAddr"
-    },
-    "viewing_key": {
-      "type": "string"
     },
     "withdrawal_allowed_from": {
       "type": "integer",
