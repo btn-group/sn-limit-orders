@@ -16,6 +16,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let state = State {
         accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
+        butt: msg.butt,
         contract_address: env.contract.address,
         viewing_key: msg.viewing_key.clone(),
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
@@ -116,6 +117,7 @@ fn public_config<S: Storage, A: Api, Q: Querier>(
     Ok(ConfigResponse {
         accepted_token: state.accepted_token,
         admin: state.admin,
+        butt: state.butt,
         withdrawal_allowed_from: state.withdrawal_allowed_from,
     })
 }
@@ -204,10 +206,18 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg {
             accepted_token: accepted_token.clone(),
+            butt: mock_butt(),
             viewing_key: "nannofromthegirlfromnowhereisathaidemon?".to_string(),
             withdrawal_allowed_from: 3,
         };
         (init(&mut deps, env.clone(), msg), deps)
+    }
+
+    fn mock_butt() -> SecretContract {
+        SecretContract {
+            address: HumanAddr::from("mock-butt-address"),
+            contract_hash: "mock-butt-contract-hash".to_string(),
+        }
     }
 
     #[test]
@@ -251,6 +261,7 @@ mod tests {
         assert_eq!(
             ConfigResponse {
                 accepted_token: accepted_token,
+                butt: mock_butt(),
                 admin: HumanAddr::from(MOCK_ADMIN),
                 withdrawal_allowed_from: 3
             },

@@ -4,11 +4,15 @@
   "type": "object",
   "required": [
     "accepted_token",
+    "butt",
     "viewing_key",
     "withdrawal_allowed_from"
   ],
   "properties": {
     "accepted_token": {
+      "$ref": "#/definitions/SecretContract"
+    },
+    "butt": {
       "$ref": "#/definitions/SecretContract"
     },
     "viewing_key": {

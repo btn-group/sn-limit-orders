@@ -15,6 +15,7 @@ pub struct SecretContract {
 pub struct State {
     pub accepted_token: SecretContract,
     pub admin: HumanAddr,
+    pub butt: SecretContract,
     pub contract_address: HumanAddr,
     pub viewing_key: String,
     pub withdrawal_allowed_from: u64,

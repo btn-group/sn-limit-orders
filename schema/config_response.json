@@ -5,6 +5,7 @@
   "required": [
     "accepted_token",
     "admin",
+    "butt",
     "withdrawal_allowed_from"
   ],
   "properties": {
@@ -13,6 +14,9 @@
     },
     "admin": {
       "$ref": "#/definitions/HumanAddr"
+    },
+    "butt": {
+      "$ref": "#/definitions/SecretContract"
     },
     "withdrawal_allowed_from": {
       "type": "integer",
