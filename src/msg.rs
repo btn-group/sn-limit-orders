@@ -38,11 +38,3 @@ pub enum ReceiveMsg {
 pub struct BalanceResponse {
     pub amount: Uint128,
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ConfigResponse {
-    pub accepted_token: SecretContract,
-    pub admin: HumanAddr,
-    pub butt: SecretContract,
-    pub withdrawal_allowed_from: u64,
-}

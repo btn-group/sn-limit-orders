@@ -1,24 +1,25 @@
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
-use crate::state::{config, config_read, State};
+use crate::constants::CONFIG_KEY;
+use crate::msg::{HandleMsg, InitMsg, QueryMsg};
+use crate::state::Config;
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
 };
+use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
-    let state = State {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let config: Config = Config {
         accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
         butt: msg.butt,
-        contract_address: env.contract.address,
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
-
-    config(&mut deps.storage).save(&state)?;
+    config_store.store(CONFIG_KEY, &config)?;
 
     Ok(InitResponse {
         messages: vec![],
@@ -43,20 +44,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => to_binary(&public_config(deps)?),
+        QueryMsg::Config {} => {
+            let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
+            Ok(to_binary(&config)?)
+        }
     }
-}
-
-fn public_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ConfigResponse> {
-    let state = config_read(&deps.storage).load()?;
-    Ok(ConfigResponse {
-        accepted_token: state.accepted_token,
-        admin: state.admin,
-        butt: state.butt,
-        withdrawal_allowed_from: state.withdrawal_allowed_from,
-    })
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
@@ -67,11 +59,11 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     _msg: Binary,
 ) -> StdResult<HandleResponse> {
     // Ensure that the sent tokens are from an expected contract address
-    let state = config_read(&deps.storage).load()?;
-    if env.message.sender != state.accepted_token.address {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
+    if env.message.sender != config.accepted_token.address {
         return Err(StdError::generic_err(format!(
             "This token is not supported. Supported: {}, given: {}",
-            state.accepted_token.address, env.message.sender
+            config.accepted_token.address, env.message.sender
         )));
     }
 
@@ -121,17 +113,17 @@ mod tests {
     }
 
     #[test]
-    fn test_public_config() {
+    fn test_config() {
         let (_init_result, deps) = init_helper();
 
         let res = query(&deps, QueryMsg::Config {}).unwrap();
-        let value: ConfigResponse = from_binary(&res).unwrap();
+        let value: Config = from_binary(&res).unwrap();
         let accepted_token = SecretContract {
             address: HumanAddr::from(MOCK_ACCEPTED_TOKEN_ADDRESS),
             contract_hash: MOCK_ACCEPTED_TOKEN_CONTRACT_HASH.to_string(),
         };
         assert_eq!(
-            ConfigResponse {
+            Config {
                 accepted_token: accepted_token,
                 butt: mock_butt(),
                 admin: HumanAddr::from(MOCK_ADMIN),
