@@ -1,12 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "State",
+  "title": "Config",
   "type": "object",
   "required": [
     "accepted_token",
     "admin",
     "butt",
-    "contract_address",
     "withdrawal_allowed_from"
   ],
   "properties": {
@@ -18,9 +17,6 @@
     },
     "butt": {
       "$ref": "#/definitions/SecretContract"
-    },
-    "contract_address": {
-      "$ref": "#/definitions/HumanAddr"
     },
     "withdrawal_allowed_from": {
       "type": "integer",
