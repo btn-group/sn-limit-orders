@@ -22,6 +22,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
         butt: msg.butt,
+        enabled: false,
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
     config_store.store(CONFIG_KEY, &config)?;
