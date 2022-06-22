@@ -2,6 +2,7 @@ mod constants;
 pub mod contract;
 pub mod msg;
 pub mod state;
+mod transaction_history;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
