@@ -5,31 +5,6 @@
     {
       "type": "object",
       "required": [
-        "change_admin"
-      ],
-      "properties": {
-        "change_admin": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            "padding": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
         "receive"
       ],
       "properties": {

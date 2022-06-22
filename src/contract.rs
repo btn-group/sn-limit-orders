@@ -32,7 +32,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::ChangeAdmin { address, .. } => change_admin(deps, env, address),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -46,27 +45,6 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     match msg {
         QueryMsg::Config {} => to_binary(&public_config(deps)?),
     }
-}
-
-fn change_admin<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    address: HumanAddr,
-) -> StdResult<HandleResponse> {
-    let mut state = config_read(&deps.storage).load()?;
-    // Ensure that admin is calling this
-    if env.message.sender != state.admin {
-        return Err(StdError::Unauthorized { backtrace: None });
-    }
-
-    state.admin = address;
-    config(&mut deps.storage).save(&state)?;
-
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
-    })
 }
 
 fn public_config<S: Storage, A: Api, Q: Querier>(
@@ -140,32 +118,6 @@ mod tests {
             address: HumanAddr::from("mock-butt-address"),
             contract_hash: "mock-butt-contract-hash".to_string(),
         }
-    }
-
-    #[test]
-    fn test_change_admin() {
-        let (init_result, mut deps) = init_helper();
-
-        assert!(
-            init_result.is_ok(),
-            "Init failed: {}",
-            init_result.err().unwrap()
-        );
-
-        let handle_msg = HandleMsg::ChangeAdmin {
-            address: HumanAddr("bob".to_string()),
-            padding: None,
-        };
-        let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg);
-        assert!(
-            handle_result.is_ok(),
-            "handle() failed: {}",
-            handle_result.err().unwrap()
-        );
-
-        let res = query(&deps, QueryMsg::Config {}).unwrap();
-        let value: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!(value.admin, HumanAddr("bob".to_string()));
     }
 
     #[test]
