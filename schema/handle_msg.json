@@ -5,6 +5,28 @@
     {
       "type": "object",
       "required": [
+        "disable"
+      ],
+      "properties": {
+        "disable": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "enable"
+      ],
+      "properties": {
+        "enable": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "receive"
       ],
       "properties": {
