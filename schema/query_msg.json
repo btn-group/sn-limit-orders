@@ -12,6 +12,46 @@
           "type": "object"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "txs"
+      ],
+      "properties": {
+        "txs": {
+          "type": "object",
+          "required": [
+            "address",
+            "key",
+            "page",
+            "page_size"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "key": {
+              "type": "string"
+            },
+            "page": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "HumanAddr": {
+      "type": "string"
+    }
+  }
 }

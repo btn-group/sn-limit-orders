@@ -1,10 +1,15 @@
-use crate::constants::CONFIG_KEY;
-use crate::msg::{HandleMsg, InitMsg, QueryMsg};
+use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
+use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use crate::state::Config;
+use crate::transaction_history::{
+    get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
+    verify_txs_for_confirm_address,
+};
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
 };
+use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -48,7 +53,29 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
         }
+        QueryMsg::Txs {
+            address,
+            key,
+            page,
+            page_size,
+        } => txs(deps, address, key, page, page_size),
     }
+}
+
+pub fn correct_amount_of_token(
+    amount_received: Uint128,
+    amount_wanted: Uint128,
+    token_received: HumanAddr,
+    token_wanted: HumanAddr,
+) -> StdResult<()> {
+    if amount_received != amount_wanted {
+        return Err(StdError::generic_err("Wrong amount received."));
+    }
+    if token_received != token_wanted {
+        return Err(StdError::generic_err("Wrong token received."));
+    }
+
+    Ok(())
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
@@ -72,6 +99,35 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
     })
+}
+
+fn txs<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+
+    // This is here so that the user can use their viewing key for butt for this
+    snip20::balance_query(
+        &deps.querier,
+        address.clone(),
+        key.to_string(),
+        BLOCK_SIZE,
+        config.butt.contract_hash,
+        config.butt.address,
+    )?;
+
+    let address = deps.api.canonical_address(&address)?;
+    let (txs, total) = get_txs(&deps.api, &deps.storage, &address, page, page_size)?;
+
+    let result = QueryAnswer::Txs {
+        txs,
+        total: Some(total),
+    };
+    to_binary(&result)
 }
 
 #[cfg(test)]

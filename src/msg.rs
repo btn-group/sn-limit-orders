@@ -1,4 +1,5 @@
 use crate::state::SecretContract;
+use crate::transaction_history::HumanizedTx;
 use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,10 +22,25 @@ pub enum HandleMsg {
     },
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryAnswer {
+    Txs {
+        txs: Vec<HumanizedTx>,
+        total: Option<u64>,
+    },
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
+    Txs {
+        address: HumanAddr,
+        key: String,
+        page: u32,
+        page_size: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
