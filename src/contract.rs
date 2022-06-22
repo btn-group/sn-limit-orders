@@ -1,5 +1,5 @@
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::msg::{HandleMsg, InitMsg, QueryMsg};
+use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use crate::state::Config;
 use crate::transaction_history::{
     get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
@@ -60,6 +60,22 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             page_size,
         } => txs(deps, address, key, page, page_size),
     }
+}
+
+pub fn correct_amount_of_token(
+    amount_received: Uint128,
+    amount_wanted: Uint128,
+    token_received: HumanAddr,
+    token_wanted: HumanAddr,
+) -> StdResult<()> {
+    if amount_received != amount_wanted {
+        return Err(StdError::generic_err("Wrong amount received."));
+    }
+    if token_received != token_wanted {
+        return Err(StdError::generic_err("Wrong token received."));
+    }
+
+    Ok(())
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
