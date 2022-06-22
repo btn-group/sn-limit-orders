@@ -1,10 +1,9 @@
-use crate::msg::{BalanceResponse, ConfigResponse, HandleMsg, InitMsg, QueryMsg};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
 use crate::state::{config, config_read, State};
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
 };
-use secret_toolkit::snip20;
 
 pub const RESPONSE_BLOCK_SIZE: usize = 256;
 
@@ -18,32 +17,13 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         admin: env.message.sender,
         butt: msg.butt,
         contract_address: env.contract.address,
-        viewing_key: msg.viewing_key.clone(),
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
 
     config(&mut deps.storage).save(&state)?;
 
-    // https://github.com/enigmampc/secret-toolkit/tree/master/packages/snip20
-    let messages = vec![
-        snip20::register_receive_msg(
-            env.contract_code_hash.clone(),
-            None,
-            1,
-            msg.accepted_token.contract_hash.clone(),
-            msg.accepted_token.address.clone(),
-        )?,
-        snip20::set_viewing_key_msg(
-            msg.viewing_key,
-            None,
-            RESPONSE_BLOCK_SIZE,
-            msg.accepted_token.contract_hash,
-            msg.accepted_token.address,
-        )?,
-    ];
-
     Ok(InitResponse {
-        messages,
+        messages: vec![],
         log: vec![],
     })
 }
@@ -58,7 +38,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
-        HandleMsg::Withdraw {} => withdraw(deps, env),
     }
 }
 
@@ -67,26 +46,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
-        QueryMsg::AcceptedTokenAvailable {} => to_binary(&accepted_token_available(deps)?),
         QueryMsg::Config {} => to_binary(&public_config(deps)?),
     }
-}
-
-fn accepted_token_available<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<BalanceResponse> {
-    let state = config_read(&deps.storage).load()?;
-    let balance = snip20::balance_query(
-        &deps.querier,
-        state.contract_address,
-        state.viewing_key,
-        RESPONSE_BLOCK_SIZE,
-        state.accepted_token.contract_hash,
-        state.accepted_token.address,
-    )?;
-    Ok(BalanceResponse {
-        amount: balance.amount,
-    })
 }
 
 fn change_admin<S: Storage, A: Api, Q: Querier>(
@@ -145,42 +106,6 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn withdraw<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let state = config_read(&deps.storage).load()?;
-    // Ensure that admin is calling this
-    if env.message.sender != state.admin {
-        return Err(StdError::Unauthorized { backtrace: None });
-    }
-
-    // Ensure that the current time is after the withdrawal_allowed_from
-    if env.block.time < state.withdrawal_allowed_from {
-        return Err(StdError::generic_err(format!(
-            "Withdrawal not allowed yet. Withdrawal allowed from: {}, current time: {}",
-            state.withdrawal_allowed_from, env.block.time
-        )));
-    }
-
-    let amount_of_accepted_token_to_send = accepted_token_available(deps)?.amount;
-    // Transfer accepted token to admin
-    let messages = vec![snip20::transfer_msg(
-        state.admin,
-        amount_of_accepted_token_to_send,
-        None,
-        RESPONSE_BLOCK_SIZE,
-        state.accepted_token.contract_hash,
-        state.accepted_token.address,
-    )?];
-
-    Ok(HandleResponse {
-        messages,
-        log: vec![],
-        data: None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,7 +132,6 @@ mod tests {
         let msg = InitMsg {
             accepted_token: accepted_token.clone(),
             butt: mock_butt(),
-            viewing_key: "nannofromthegirlfromnowhereisathaidemon?".to_string(),
             withdrawal_allowed_from: 3,
         };
         (init(&mut deps, env.clone(), msg), deps)
@@ -252,8 +176,6 @@ mod tests {
 
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
-        // Test response does not include viewing key.
-        // Test that the desired fields are returned.
         let accepted_token = SecretContract {
             address: HumanAddr::from(MOCK_ACCEPTED_TOKEN_ADDRESS),
             contract_hash: MOCK_ACCEPTED_TOKEN_CONTRACT_HASH.to_string(),
@@ -308,42 +230,5 @@ mod tests {
             msg.clone(),
         );
         handle_response.unwrap();
-    }
-
-    #[test]
-    fn test_withdraw() {
-        let (_init_result, mut deps) = init_helper();
-        let msg = HandleMsg::Withdraw {};
-        let env_block_time = mock_env("anyone", &[]).block.time;
-
-        // It raises an error when non-admin calls it
-        let handle_response = handle(&mut deps, mock_env("anyone", &[]), msg.clone());
-        assert_eq!(
-            handle_response.unwrap_err(),
-            StdError::Unauthorized { backtrace: None }
-        );
-
-        // It raises an error when admin calls this too early
-        let mut state = config_read(&deps.storage).load().unwrap();
-        state.withdrawal_allowed_from = env_block_time + 3;
-        config(&mut deps.storage).save(&state).unwrap();
-        let handle_response = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), msg.clone());
-        assert_eq!(
-            handle_response.unwrap_err(),
-            StdError::generic_err(format!(
-                "Withdrawal not allowed yet. Withdrawal allowed from: {}, current time: {}",
-                state.withdrawal_allowed_from, env_block_time
-            )),
-        );
-
-        // Test that a request is sent to the offered token contract address to transfer tokens to admin
-        let mut state = config_read(&deps.storage).load().unwrap();
-        state.withdrawal_allowed_from = env_block_time - 3;
-        config(&mut deps.storage).save(&state).unwrap();
-        let handle_response = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), msg.clone());
-        assert_eq!(
-            handle_response.unwrap_err(),
-            StdError::generic_err(format!("Error performing Balance query: Generic error: Querier system error: No such contract: {}", MOCK_ACCEPTED_TOKEN_ADDRESS)),
-        );
     }
 }
