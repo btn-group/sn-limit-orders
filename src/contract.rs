@@ -40,6 +40,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::Disable {} => disable(deps, env),
         HandleMsg::Enable {} => enable(deps, env),
         HandleMsg::Receive {
             from, amount, msg, ..
@@ -79,6 +80,23 @@ pub fn correct_amount_of_token(
     }
 
     Ok(())
+}
+
+fn disable<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut config: Config = config_store.load(CONFIG_KEY)?;
+    authorize(env.message.sender, config.admin.clone())?;
+
+    config.enabled = false;
+    config_store.store(CONFIG_KEY, &config)?;
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn enable<S: Storage, A: Api, Q: Querier>(
@@ -208,6 +226,34 @@ mod tests {
             },
             value
         );
+    }
+
+    #[test]
+    fn test_disable() {
+        let (_init_result, mut deps) = init_helper();
+
+        // Initially false
+        let res = query(&deps, QueryMsg::Config {}).unwrap();
+        let mut config: Config = from_binary(&res).unwrap();
+
+        // when enabled
+        let mut msg = HandleMsg::Enable {};
+        handle(&mut deps, mock_env(config.admin.clone(), &[]), msg.clone()).unwrap();
+
+        // = when disabled
+        msg = HandleMsg::Disable {};
+        // == when called by a non-admin
+        // == * it raises an error
+        assert_eq!(
+            handle(&mut deps, mock_env("non-admin", &[]), msg.clone()).unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // == when called by an admin
+        // == * it disables the contract
+        handle(&mut deps, mock_env(config.admin, &[]), msg.clone()).unwrap();
+        config = from_binary(&res).unwrap();
+        assert_eq!(false, config.enabled);
     }
 
     #[test]
