@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub accepted_token: SecretContract,
+    pub butt: SecretContract,
     pub viewing_key: String,
     pub withdrawal_allowed_from: u64,
 }
@@ -49,5 +50,6 @@ pub struct BalanceResponse {
 pub struct ConfigResponse {
     pub accepted_token: SecretContract,
     pub admin: HumanAddr,
+    pub butt: SecretContract,
     pub withdrawal_allowed_from: u64,
 }

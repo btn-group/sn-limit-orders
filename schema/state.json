@@ -5,6 +5,7 @@
   "required": [
     "accepted_token",
     "admin",
+    "butt",
     "contract_address",
     "viewing_key",
     "withdrawal_allowed_from"
@@ -15,6 +16,9 @@
     },
     "admin": {
       "$ref": "#/definitions/HumanAddr"
+    },
+    "butt": {
+      "$ref": "#/definitions/SecretContract"
     },
     "contract_address": {
       "$ref": "#/definitions/HumanAddr"
