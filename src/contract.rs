@@ -1,14 +1,14 @@
 use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
+use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
 use crate::state::Config;
 use crate::transaction_history::{
     get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
     verify_txs_for_confirm_address,
 };
 use cosmwasm_std::{
-    to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
-    StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -116,27 +116,73 @@ fn enable<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse> {
+    response.map(|mut response| {
+        response.data = response.data.map(|mut data| {
+            space_pad(BLOCK_SIZE, &mut data.0);
+            data
+        });
+        response
+    })
+}
+
+// Take a Vec<u8> and pad it up to a multiple of `block_size`, using spaces at the end.
+fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
+    let len = message.len();
+    let surplus = len % block_size;
+    if surplus == 0 {
+        return message;
+    }
+
+    let missing = block_size - surplus;
+    message.reserve(missing);
+    message.extend(std::iter::repeat(b' ').take(missing));
+    message
+}
+
 fn receive<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    _from: HumanAddr,
-    _amount: Uint128,
-    _msg: Binary,
+    from: HumanAddr,
+    amount: Uint128,
+    msg: Binary,
 ) -> StdResult<HandleResponse> {
-    // Ensure that the sent tokens are from an expected contract address
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
-    if env.message.sender != config.accepted_token.address {
-        return Err(StdError::generic_err(format!(
-            "This token is not supported. Supported: {}, given: {}",
-            config.accepted_token.address, env.message.sender
-        )));
-    }
+    // // Ensure that the sent tokens are from an expected contract address
+    // let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
+    // if env.message.sender != config.accepted_token.address {
+    //     return Err(StdError::generic_err(format!(
+    //         "This token is not supported. Supported: {}, given: {}",
+    //         config.accepted_token.address, env.message.sender
+    //     )));
+    // }
 
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
-    })
+    // Ok(HandleResponse {
+    //     messages: vec![],
+    //     log: vec![],
+    //     data: None,
+    // })
+
+    let msg: ReceiveMsg = from_binary(&msg)?;
+    let response = match msg {
+        // ReceiveMsg::Cancel { position } => cancel(deps, &env, from, amount, position),
+        ReceiveMsg::CreateReceiveRequest {
+            address,
+            send_amount,
+            description,
+            token,
+        } => create_receive_request(
+            deps,
+            &env,
+            from,
+            amount,
+            address,
+            send_amount,
+            description,
+            token,
+        ),
+        // ReceiveMsg::SendPayment { position } => send_payment(deps, &env, from, amount, position),
+    };
+    pad_response(response)
 }
 
 fn txs<S: Storage, A: Api, Q: Querier>(
