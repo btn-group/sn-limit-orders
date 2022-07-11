@@ -4,8 +4,7 @@
   "type": "object",
   "required": [
     "accepted_token",
-    "butt",
-    "withdrawal_allowed_from"
+    "butt"
   ],
   "properties": {
     "accepted_token": {
@@ -13,11 +12,6 @@
     },
     "butt": {
       "$ref": "#/definitions/SecretContract"
-    },
-    "withdrawal_allowed_from": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
     }
   },
   "definitions": {

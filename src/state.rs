@@ -13,5 +13,4 @@ pub struct Config {
     pub accepted_token: SecretContract,
     pub admin: HumanAddr,
     pub butt: SecretContract,
-    pub withdrawal_allowed_from: u64,
 }
