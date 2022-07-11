@@ -1,12 +1,15 @@
+use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
-use crate::orders::{get_orders, store_orders, update_order, verify_orders_for_cancel};
+use crate::orders::{
+    get_orders, store_orders, update_order, verify_orders_for_cancel, verify_orders_for_fill,
+};
 use crate::state::Config;
 use crate::state::SecretContract;
 use cosmwasm_std::CosmosMsg;
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    Querier, StdError, StdResult, Storage, Uint128,
+    Querier, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -59,22 +62,6 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             page_size,
         } => orders(deps, address, key, page, page_size),
     }
-}
-
-pub fn correct_amount_of_token(
-    amount_received: Uint128,
-    amount_wanted: Uint128,
-    token_received: HumanAddr,
-    token_wanted: HumanAddr,
-) -> StdResult<()> {
-    if amount_received != amount_wanted {
-        return Err(StdError::generic_err("Wrong amount received."));
-    }
-    if token_received != token_wanted {
-        return Err(StdError::generic_err("Wrong token received."));
-    }
-
-    Ok(())
 }
 
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
@@ -168,6 +155,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             to_amount,
             to_token,
         } => create_order(deps, &env, from, amount, to_amount, to_token),
+        ReceiveMsg::Fill { position } => fill_order(deps, &env, from, amount, position),
     };
     pad_response(response)
 }
@@ -232,6 +220,69 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
+fn fill_order<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    authorize(from, config.admin)?;
+
+    let (mut creator_order, mut contract_order) = verify_orders_for_fill(
+        &deps.api,
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.contract.address)?,
+        amount,
+        position,
+        env.message.sender.clone(),
+    )?;
+    // Update filled amount
+    // If filled amount is the same as amount set status to finalized
+    // But do we even need a status apart from cancelled as we can figured it out from partly_filled
+    // Send fee?
+
+    // creator_order.status = 3;
+    // contract_order.status = 3;
+    // update_tx(
+    //     &mut deps.storage,
+    //     &creator_order.from.clone(),
+    //     creator_order.clone(),
+    // )?;
+    // update_tx(
+    //     &mut deps.storage,
+    //     &contract_order.to.clone(),
+    //     contract_order,
+    // )?;
+    // let config: Config = TypedStore::attach(&mut deps.storage)
+    //     .load(CONFIG_KEY)
+    //     .unwrap();
+    let mut messages: Vec<CosmosMsg> = vec![];
+    // messages.push(snip20::transfer_msg(
+    //     config.treasury_address,
+    //     creator_order.fee,
+    //     None,
+    //     BLOCK_SIZE,
+    //     config.sscrt.contract_hash,
+    //     config.sscrt.address,
+    // )?);
+    // messages.push(snip20::transfer_msg(
+    //     deps.api.human_address(&creator_order.to)?,
+    //     creator_order.amount,
+    //     None,
+    //     BLOCK_SIZE,
+    //     creator_order.token.contract_hash,
+    //     env.message.sender.clone(),
+    // )?);
+
+    Ok(HandleResponse {
+        messages,
         log: vec![],
         data: None,
     })
