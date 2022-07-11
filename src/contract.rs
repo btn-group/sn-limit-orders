@@ -1,7 +1,7 @@
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
+use crate::orders::get_orders;
 use crate::state::Config;
-use crate::transaction_history::get_txs;
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
@@ -50,12 +50,12 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
         }
-        QueryMsg::Txs {
+        QueryMsg::Orders {
             address,
             key,
             page,
             page_size,
-        } => txs(deps, address, key, page, page_size),
+        } => orders(deps, address, key, page, page_size),
     }
 }
 
@@ -98,7 +98,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn txs<S: Storage, A: Api, Q: Querier>(
+fn orders<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
     key: String,
@@ -118,10 +118,10 @@ fn txs<S: Storage, A: Api, Q: Querier>(
     )?;
 
     let address = deps.api.canonical_address(&address)?;
-    let (txs, total) = get_txs(&deps.api, &deps.storage, &address, page, page_size)?;
+    let (orders, total) = get_orders(&deps.api, &deps.storage, &address, page, page_size)?;
 
-    let result = QueryAnswer::Txs {
-        txs,
+    let result = QueryAnswer::Orders {
+        orders,
         total: Some(total),
     };
     to_binary(&result)
