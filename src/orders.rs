@@ -17,8 +17,6 @@ pub struct HumanizedOrder {
     pub to: HumanAddr,
     pub amount: Uint128,
     pub token: SecretContract,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
@@ -34,8 +32,6 @@ pub struct Order {
     pub creator: HumanAddr,
     pub amount: Uint128,
     pub token: SecretContract,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
@@ -48,7 +44,6 @@ impl Order {
             to: api.human_address(&self.to)?,
             amount: self.amount,
             token: self.token,
-            description: self.description,
             status: self.status,
             block_time: self.block_time,
             block_height: self.block_height,
@@ -99,7 +94,6 @@ pub fn store_orders<S: Storage>(
     creator: HumanAddr,
     amount: Uint128,
     token: SecretContract,
-    description: Option<String>,
     status: u8,
     block: &cosmwasm_std::BlockInfo,
 ) -> StdResult<()> {
@@ -120,7 +114,6 @@ pub fn store_orders<S: Storage>(
         creator: creator,
         amount: amount,
         token: token,
-        description: description,
         status: status,
         block_time: block.time,
         block_height: block.height,
