@@ -1,10 +1,6 @@
-use crate::authorize::authorize;
 use crate::constants::PREFIX_ORDERS;
-use crate::contract::correct_amount_of_token;
 use crate::state::SecretContract;
-use cosmwasm_std::{
-    Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
-};
+use cosmwasm_std::{Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdResult, Storage, Uint128};
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use schemars::JsonSchema;
 use secret_toolkit::storage::{AppendStore, AppendStoreMut};
@@ -12,11 +8,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug)]
 pub struct HumanizedOrder {
+    pub creator: HumanAddr,
     pub position: u32,
-    pub from: HumanAddr,
-    pub to: HumanAddr,
+    pub from_token: SecretContract,
+    pub to_token: SecretContract,
     pub amount: Uint128,
-    pub token: SecretContract,
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
@@ -24,14 +20,13 @@ pub struct HumanizedOrder {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 pub struct Order {
+    pub creator: CanonicalAddr,
     pub position: u32,
     pub other_storage_position: u32,
     pub fee: Uint128,
-    pub from: CanonicalAddr,
-    pub to: CanonicalAddr,
-    pub creator: HumanAddr,
+    pub from_token: SecretContract,
+    pub to_token: SecretContract,
     pub amount: Uint128,
-    pub token: SecretContract,
     pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
@@ -39,11 +34,11 @@ pub struct Order {
 impl Order {
     fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
         Ok(HumanizedOrder {
+            creator: api.human_address(&self.creator)?,
             position: self.position,
-            from: api.human_address(&self.from)?,
-            to: api.human_address(&self.to)?,
+            from_token: self.from_token,
+            to_token: self.to_token,
             amount: self.amount,
-            token: self.token,
             status: self.status,
             block_time: self.block_time,
             block_height: self.block_height,
@@ -89,40 +84,33 @@ pub fn get_orders<A: Api, S: ReadonlyStorage>(
 pub fn store_orders<S: Storage>(
     store: &mut S,
     fee: Uint128,
-    from: &CanonicalAddr,
-    to: &CanonicalAddr,
-    creator: HumanAddr,
+    from_token: SecretContract,
+    to_token: SecretContract,
+    creator: CanonicalAddr,
     amount: Uint128,
-    token: SecretContract,
     status: u8,
     block: &cosmwasm_std::BlockInfo,
+    contract_address: CanonicalAddr,
 ) -> StdResult<()> {
-    if from == to {
-        return Err(StdError::generic_err(
-            "From and to addresses must be different.",
-        ));
-    }
-
-    let from_position = get_next_position(store, from)?;
-    let to_position = get_next_position(store, to)?;
+    let creator_position = get_next_position(store, &creator)?;
+    let contract_address_position = get_next_position(store, &contract_address)?;
     let from_order = Order {
-        position: from_position,
-        other_storage_position: to_position,
+        position: creator_position,
+        other_storage_position: contract_address_position,
         fee: fee,
-        from: from.clone(),
-        to: to.clone(),
-        creator: creator,
+        from_token: from_token,
+        to_token: to_token,
+        creator: creator.clone(),
         amount: amount,
-        token: token,
         status: status,
         block_time: block.time,
         block_height: block.height,
     };
-    append_order(store, &from_order, from)?;
+    append_order(store, &from_order, &creator)?;
     let mut to_order = from_order;
-    to_order.position = to_position;
-    to_order.other_storage_position = from_position;
-    append_order(store, &to_order, to)?;
+    to_order.position = contract_address_position;
+    to_order.other_storage_position = creator_position;
+    append_order(store, &to_order, &contract_address)?;
 
     Ok(())
 }
@@ -154,74 +142,74 @@ pub fn update_order<S: Storage>(
     Ok(())
 }
 
-// Verify the Order and then verify it's counter Order
-pub fn verify_orders<A: Api, S: Storage>(
-    api: &A,
-    store: &mut S,
-    address: &CanonicalAddr,
-    amount: Uint128,
-    position: u32,
-    status: u8,
-    token_address: HumanAddr,
-) -> StdResult<(Order, Order)> {
-    let from_order = order_at_position(store, address, position)?;
-    let to_order = order_at_position(store, &from_order.to, from_order.other_storage_position)?;
-    correct_amount_of_token(
-        amount,
-        to_order.amount,
-        token_address,
-        to_order.token.address.clone(),
-    )?;
-    authorize(
-        api.human_address(&to_order.from)?,
-        api.human_address(address)?,
-    )?;
-    if to_order.status != status {
-        return Err(StdError::generic_err(
-            "Order status at that position is incorrect.",
-        ));
-    }
+// // Verify the Order and then verify it's counter Order
+// pub fn verify_orders<A: Api, S: Storage>(
+//     api: &A,
+//     store: &mut S,
+//     address: &CanonicalAddr,
+//     amount: Uint128,
+//     position: u32,
+//     status: u8,
+//     token_address: HumanAddr,
+// ) -> StdResult<(Order, Order)> {
+//     let from_order = order_at_position(store, address, position)?;
+//     let to_order = order_at_position(store, &from_order.to_token, from_order.other_storage_position)?;
+//     correct_amount_of_token(
+//         amount,
+//         to_order.amount,
+//         token_address,
+//         to_order.token.address.clone(),
+//     )?;
+//     authorize(
+//         api.human_address(&to_order.from)?,
+//         api.human_address(address)?,
+//     )?;
+//     if to_order.status != status {
+//         return Err(StdError::generic_err(
+//             "Order status at that position is incorrect.",
+//         ));
+//     }
 
-    Ok((from_order, to_order))
-}
+//     Ok((from_order, to_order))
+// }
 
-pub fn verify_orders_for_cancel<S: Storage>(
-    store: &mut S,
-    address: &CanonicalAddr,
-    position: u32,
-) -> StdResult<(Order, Order)> {
-    let from_order = order_at_position(store, address, position)?;
-    let to_order = order_at_position(store, &from_order.to, from_order.other_storage_position)?;
-    if to_order.status == 2 {
-        return Err(StdError::generic_err("Order already cancelled."));
-    }
-    if to_order.status == 3 {
-        return Err(StdError::generic_err("Order already finalized."));
-    }
+// pub fn verify_orders_for_cancel<S: Storage>(
+//     store: &mut S,
+//     address: &CanonicalAddr,
+//     position: u32,
+// ) -> StdResult<(Order, Order)> {
+//     let from_order = order_at_position(store, address, position)?;
+//     let to_order = order_at_position(store, &from_order.to_token, from_order.other_storage_position)?;
+//     if to_order.status == 2 {
+//         return Err(StdError::generic_err("Order already cancelled."));
+//     }
+//     if to_order.status == 3 {
+//         return Err(StdError::generic_err("Order already finalized."));
+//     }
 
-    Ok((from_order, to_order))
-}
+//     Ok((from_order, to_order))
+// }
 
-pub fn verify_orders_for_confirm_address<A: Api, S: Storage>(
-    api: &A,
-    store: &mut S,
-    address: &CanonicalAddr,
-    position: u32,
-) -> StdResult<(Order, Order)> {
-    let to_order = order_at_position(store, address, position)?;
-    let from_order = order_at_position(store, &to_order.from, to_order.other_storage_position)?;
-    authorize(
-        api.human_address(&to_order.to)?,
-        api.human_address(address)?,
-    )?;
-    if to_order.status != 0 {
-        return Err(StdError::generic_err(
-            "Order not waiting for address confirmation.",
-        ));
-    }
+// pub fn verify_orders_for_confirm_address<A: Api, S: Storage>(
+//     api: &A,
+//     store: &mut S,
+//     address: &CanonicalAddr,
+//     position: u32,
+// ) -> StdResult<(Order, Order)> {
+//     let creator_order = order_at_position(store, address, position)?;
+//     let contract_order = order_at_position(store, &to_order.from, to_order.other_storage_position)?;
+//     authorize(
+//         api.human_address(&to_order.to_token)?,
+//         api.human_address(address)?,
+//     )?;
+//     if to_order.status != 0 {
+//         return Err(StdError::generic_err(
+//             "Order not waiting for address confirmation.",
+//         ));
+//     }
 
-    Ok((from_order, to_order))
-}
+//     Ok((from_order, to_order))
+// }
 
 fn append_order<S: Storage>(
     store: &mut S,
