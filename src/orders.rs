@@ -17,9 +17,9 @@ pub struct HumanizedOrder {
     pub amount: Uint128,
     pub filled_amount: Uint128,
     pub to_amount: Uint128,
-    pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
+    pub cancelled: bool,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -32,9 +32,9 @@ pub struct Order {
     pub amount: Uint128,
     pub filled_amount: Uint128,
     pub to_amount: Uint128,
-    pub status: u8,
     pub block_time: u64,
     pub block_height: u64,
+    pub cancelled: bool,
 }
 impl Order {
     fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
@@ -46,9 +46,9 @@ impl Order {
             amount: self.amount,
             filled_amount: self.filled_amount,
             to_amount: self.to_amount,
-            status: self.status,
             block_time: self.block_time,
             block_height: self.block_height,
+            cancelled: self.cancelled,
         })
     }
 }
@@ -95,7 +95,6 @@ pub fn store_orders<S: Storage>(
     creator: CanonicalAddr,
     amount: Uint128,
     to_amount: Uint128,
-    status: u8,
     block: &cosmwasm_std::BlockInfo,
     contract_address: CanonicalAddr,
 ) -> StdResult<()> {
@@ -110,9 +109,9 @@ pub fn store_orders<S: Storage>(
         amount: amount,
         filled_amount: Uint128(0),
         to_amount: to_amount,
-        status: status,
         block_time: block.time,
         block_height: block.height,
+        cancelled: false,
     };
     append_order(store, &from_order, &creator)?;
     let mut to_order = from_order;
@@ -167,11 +166,11 @@ pub fn verify_orders_for_fill<A: Api, S: Storage>(
     )?;
     // Check the token is the same at the to_token
     // Check the amount + filled amount is less than or equal to amount
-    if creator_order.status == 2 {
+    if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if creator_order.status == 3 {
-        return Err(StdError::generic_err("Order already finalized."));
+    if creator_order.amount == creator_order.filled_amount {
+        return Err(StdError::generic_err("Order has been filled."));
     }
 
     Ok((creator_order, contract_order))
@@ -189,11 +188,11 @@ pub fn verify_orders_for_cancel<S: Storage>(
         contract_address,
         creator_order.other_storage_position,
     )?;
-    if creator_order.status == 2 {
+    if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if creator_order.status == 3 {
-        return Err(StdError::generic_err("Order already finalized."));
+    if creator_order.amount == creator_order.filled_amount {
+        return Err(StdError::generic_err("Order has been filled."));
     }
 
     Ok((creator_order, contract_order))
