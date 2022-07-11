@@ -23,7 +23,6 @@ pub struct Order {
     pub creator: CanonicalAddr,
     pub position: u32,
     pub other_storage_position: u32,
-    pub fee: Uint128,
     pub from_token: SecretContract,
     pub to_token: SecretContract,
     pub amount: Uint128,
@@ -83,7 +82,6 @@ pub fn get_orders<A: Api, S: ReadonlyStorage>(
 
 pub fn store_orders<S: Storage>(
     store: &mut S,
-    fee: Uint128,
     from_token: SecretContract,
     to_token: SecretContract,
     creator: CanonicalAddr,
@@ -97,7 +95,6 @@ pub fn store_orders<S: Storage>(
     let from_order = Order {
         position: creator_position,
         other_storage_position: contract_address_position,
-        fee: fee,
         from_token: from_token,
         to_token: to_token,
         creator: creator.clone(),

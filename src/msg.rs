@@ -48,7 +48,10 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    CreateOrder {},
+    CreateOrder {
+        to_amount: Uint128,
+        to_token: SecretContract,
+    },
 }
 
 // QUERY RESPONSE STRUCTS

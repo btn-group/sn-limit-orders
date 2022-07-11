@@ -1,6 +1,6 @@
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
-use crate::orders::get_orders;
+use crate::orders::{get_orders, store_orders};
 use crate::state::Config;
 use crate::state::SecretContract;
 use cosmwasm_std::{
@@ -124,20 +124,9 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     let msg: ReceiveMsg = from_binary(&msg)?;
     let response = match msg {
         ReceiveMsg::CreateOrder {
-            address,
-            send_amount,
-            description,
-            token,
-        } => create_order(
-            deps,
-            &env,
-            from,
-            amount,
-            address,
-            send_amount,
-            description,
-            token,
-        ),
+            to_amount,
+            to_token,
+        } => create_order(deps, &env, from, amount, to_amount, to_token),
     };
     pad_response(response)
 }
@@ -182,41 +171,25 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     from: HumanAddr,
     amount: Uint128,
-    address: HumanAddr,
-    send_amount: Uint128,
-    description: Option<String>,
-    token: SecretContract,
+    to_amount: HumanAddr,
+    to_token: SecretContract,
 ) -> StdResult<HandleResponse> {
-    let config: Config = TypedStore::attach(&mut deps.storage)
-        .load(CONFIG_KEY)
-        .unwrap();
-    correct_amount_of_token(
-        amount,
-        config.fee,
-        env.message.sender.clone(),
-        config.sscrt.address,
-    )?;
-    store_txs(
+    store_orders(
         &mut deps.storage,
-        config.fee,
-        &deps.api.canonical_address(&address)?,
-        &deps.api.canonical_address(&from)?,
+        SecretContract {
+            address: env.message.sender,
+            contract_hash: "CHANGETHISLATER".to_string(),
+        },
+        to_token,
         from,
-        send_amount,
-        token.clone(),
-        description,
-        1,
+        amount,
+        0,
         &env.block,
+        env.contract.address,
     )?;
-    let mut messages: Vec<CosmosMsg> = vec![];
-    let register_token_msg: Option<CosmosMsg> =
-        register_token(&mut deps.storage, env.contract_code_hash.clone(), token)?;
-    if register_token_msg.is_some() {
-        messages.push(register_token_msg.unwrap())
-    }
 
     Ok(HandleResponse {
-        messages,
+        messages: vec![],
         log: vec![],
         data: None,
     })
@@ -225,7 +198,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::msg::ReceiveMsg;
+
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
