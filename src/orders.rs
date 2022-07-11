@@ -1,6 +1,8 @@
 use crate::constants::PREFIX_ORDERS;
 use crate::state::SecretContract;
-use cosmwasm_std::{Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdResult, Storage, Uint128};
+use cosmwasm_std::{
+    Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
+};
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use schemars::JsonSchema;
 use secret_toolkit::storage::{AppendStore, AppendStoreMut};
@@ -13,6 +15,7 @@ pub struct HumanizedOrder {
     pub from_token: SecretContract,
     pub to_token: SecretContract,
     pub amount: Uint128,
+    pub filled_amount: Uint128,
     pub to_amount: Uint128,
     pub status: u8,
     pub block_time: u64,
@@ -27,6 +30,7 @@ pub struct Order {
     pub from_token: SecretContract,
     pub to_token: SecretContract,
     pub amount: Uint128,
+    pub filled_amount: Uint128,
     pub to_amount: Uint128,
     pub status: u8,
     pub block_time: u64,
@@ -175,22 +179,27 @@ pub fn update_order<S: Storage>(
 //     Ok((from_order, to_order))
 // }
 
-// pub fn verify_orders_for_cancel<S: Storage>(
-//     store: &mut S,
-//     address: &CanonicalAddr,
-//     position: u32,
-// ) -> StdResult<(Order, Order)> {
-//     let from_order = order_at_position(store, address, position)?;
-//     let to_order = order_at_position(store, &from_order.to_token, from_order.other_storage_position)?;
-//     if to_order.status == 2 {
-//         return Err(StdError::generic_err("Order already cancelled."));
-//     }
-//     if to_order.status == 3 {
-//         return Err(StdError::generic_err("Order already finalized."));
-//     }
+pub fn verify_orders_for_cancel<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    contract_address: &CanonicalAddr,
+    position: u32,
+) -> StdResult<(Order, Order)> {
+    let creator_order = order_at_position(store, address, position)?;
+    let contract_order = order_at_position(
+        store,
+        contract_address,
+        creator_order.other_storage_position,
+    )?;
+    if creator_order.status == 2 {
+        return Err(StdError::generic_err("Order already cancelled."));
+    }
+    if creator_order.status == 3 {
+        return Err(StdError::generic_err("Order already finalized."));
+    }
 
-//     Ok((from_order, to_order))
-// }
+    Ok((creator_order, contract_order))
+}
 
 // pub fn verify_orders_for_confirm_address<A: Api, S: Storage>(
 //     api: &A,

@@ -1,8 +1,9 @@
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
-use crate::orders::{get_orders, store_orders};
+use crate::orders::{get_orders, store_orders, update_order, verify_orders_for_cancel};
 use crate::state::Config;
 use crate::state::SecretContract;
+use cosmwasm_std::CosmosMsg;
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     Querier, StdError, StdResult, Storage, Uint128,
@@ -34,6 +35,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::Cancel { position } => cancel_order(deps, &env, position),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -73,6 +75,45 @@ pub fn correct_amount_of_token(
     }
 
     Ok(())
+}
+
+fn cancel_order<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    position: u32,
+) -> StdResult<HandleResponse> {
+    let (mut creator_order, mut contract_order) = verify_orders_for_cancel(
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.message.sender)?,
+        &deps.api.canonical_address(&env.contract.address)?,
+        position,
+    )?;
+    // Send refund to the creator
+    let mut messages: Vec<CosmosMsg> = vec![];
+    messages.push(snip20::transfer_msg(
+        deps.api.human_address(&creator_order.creator)?,
+        Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
+        None,
+        BLOCK_SIZE,
+        creator_order.from_token.contract_hash,
+        creator_order.from_token.address,
+    )?);
+
+    // Update Txs
+    creator_order.status = 2;
+    contract_order.status = 2;
+    update_order(&mut deps.storage, &creator_order.creator, creator_order)?;
+    update_order(
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.contract.address)?,
+        contract_order,
+    )?;
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
 }
 
 fn orders<S: Storage, A: Api, Q: Querier>(
