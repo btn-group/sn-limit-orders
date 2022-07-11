@@ -10,7 +10,6 @@ pub struct SecretContract {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    pub accepted_token: SecretContract,
     pub admin: HumanAddr,
     pub butt: SecretContract,
 }

@@ -32,6 +32,28 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "register_tokens"
+      ],
+      "properties": {
+        "register_tokens": {
+          "type": "object",
+          "required": [
+            "tokens"
+          ],
+          "properties": {
+            "tokens": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SecretContract"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
@@ -41,6 +63,21 @@
     },
     "HumanAddr": {
       "type": "string"
+    },
+    "SecretContract": {
+      "type": "object",
+      "required": [
+        "address",
+        "contract_hash"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "contract_hash": {
+          "type": "string"
+        }
+      }
     },
     "Uint128": {
       "type": "string"

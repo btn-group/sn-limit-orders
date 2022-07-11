@@ -19,6 +19,9 @@ pub enum HandleMsg {
         amount: Uint128,
         msg: Binary,
     },
+    RegisterTokens {
+        tokens: Vec<SecretContract>,
+    },
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
