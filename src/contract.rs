@@ -1,11 +1,11 @@
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
-use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
-use crate::orders::get_orders;
+use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
+use crate::orders::{get_orders, store_orders};
 use crate::state::Config;
 use crate::state::SecretContract;
 use cosmwasm_std::{
-    to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
-    StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -75,41 +75,6 @@ pub fn correct_amount_of_token(
     Ok(())
 }
 
-fn receive<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _from: HumanAddr,
-    _amount: Uint128,
-    _msg: Binary,
-) -> StdResult<HandleResponse> {
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
-    })
-}
-
-fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleResponse> {
-    let mut messages = vec![];
-    for token in tokens {
-        let address = token.address;
-        let contract_hash = token.contract_hash;
-        messages.push(snip20::register_receive_msg(
-            env.contract_code_hash.clone(),
-            None,
-            BLOCK_SIZE,
-            contract_hash.clone(),
-            address.clone(),
-        )?);
-    }
-
-    Ok(HandleResponse {
-        messages,
-        log: vec![],
-        data: None,
-    })
-}
-
 fn orders<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
@@ -139,10 +104,102 @@ fn orders<S: Storage, A: Api, Q: Querier>(
     to_binary(&result)
 }
 
+fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse> {
+    response.map(|mut response| {
+        response.data = response.data.map(|mut data| {
+            space_pad(BLOCK_SIZE, &mut data.0);
+            data
+        });
+        response
+    })
+}
+
+fn receive<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    from: HumanAddr,
+    amount: Uint128,
+    msg: Binary,
+) -> StdResult<HandleResponse> {
+    let msg: ReceiveMsg = from_binary(&msg)?;
+    let response = match msg {
+        ReceiveMsg::CreateOrder {
+            to_amount,
+            to_token,
+        } => create_order(deps, &env, from, amount, to_amount, to_token),
+    };
+    pad_response(response)
+}
+
+fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleResponse> {
+    let mut messages = vec![];
+    for token in tokens {
+        let address = token.address;
+        let contract_hash = token.contract_hash;
+        messages.push(snip20::register_receive_msg(
+            env.contract_code_hash.clone(),
+            None,
+            BLOCK_SIZE,
+            contract_hash.clone(),
+            address.clone(),
+        )?);
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+// Take a Vec<u8> and pad it up to a multiple of `block_size`, using spaces at the end.
+fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
+    let len = message.len();
+    let surplus = len % block_size;
+    if surplus == 0 {
+        return message;
+    }
+
+    let missing = block_size - surplus;
+    message.reserve(missing);
+    message.extend(std::iter::repeat(b' ').take(missing));
+    message
+}
+
+fn create_order<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    to_amount: Uint128,
+    to_token: SecretContract,
+) -> StdResult<HandleResponse> {
+    store_orders(
+        &mut deps.storage,
+        SecretContract {
+            address: env.message.sender.clone(),
+            contract_hash: "CHANGETHISLATER".to_string(),
+        },
+        to_token,
+        deps.api.canonical_address(&from)?,
+        amount,
+        to_amount,
+        0,
+        &env.block,
+        deps.api.canonical_address(&env.contract.address)?,
+    )?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::msg::ReceiveMsg;
+
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
