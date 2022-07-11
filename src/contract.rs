@@ -171,21 +171,22 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     from: HumanAddr,
     amount: Uint128,
-    to_amount: HumanAddr,
+    to_amount: Uint128,
     to_token: SecretContract,
 ) -> StdResult<HandleResponse> {
     store_orders(
         &mut deps.storage,
         SecretContract {
-            address: env.message.sender,
+            address: env.message.sender.clone(),
             contract_hash: "CHANGETHISLATER".to_string(),
         },
         to_token,
-        from,
+        deps.api.canonical_address(&from)?,
         amount,
+        to_amount,
         0,
         &env.block,
-        env.contract.address,
+        deps.api.canonical_address(&env.contract.address)?,
     )?;
 
     Ok(HandleResponse {
