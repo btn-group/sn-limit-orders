@@ -44,6 +44,7 @@ impl Order {
             from_token: self.from_token,
             to_token: self.to_token,
             amount: self.amount,
+            filled_amount: self.filled_amount,
             to_amount: self.to_amount,
             status: self.status,
             block_time: self.block_time,
@@ -107,6 +108,7 @@ pub fn store_orders<S: Storage>(
         to_token: to_token,
         creator: creator.clone(),
         amount: amount,
+        filled_amount: Uint128(0),
         to_amount: to_amount,
         status: status,
         block_time: block.time,
@@ -148,36 +150,32 @@ pub fn update_order<S: Storage>(
     Ok(())
 }
 
-// // Verify the Order and then verify it's counter Order
-// pub fn verify_orders<A: Api, S: Storage>(
-//     api: &A,
-//     store: &mut S,
-//     address: &CanonicalAddr,
-//     amount: Uint128,
-//     position: u32,
-//     status: u8,
-//     token_address: HumanAddr,
-// ) -> StdResult<(Order, Order)> {
-//     let from_order = order_at_position(store, address, position)?;
-//     let to_order = order_at_position(store, &from_order.to_token, from_order.other_storage_position)?;
-//     correct_amount_of_token(
-//         amount,
-//         to_order.amount,
-//         token_address,
-//         to_order.token.address.clone(),
-//     )?;
-//     authorize(
-//         api.human_address(&to_order.from)?,
-//         api.human_address(address)?,
-//     )?;
-//     if to_order.status != status {
-//         return Err(StdError::generic_err(
-//             "Order status at that position is incorrect.",
-//         ));
-//     }
+// Verify the Order and then verify it's counter Order
+pub fn verify_orders_for_fill<A: Api, S: Storage>(
+    api: &A,
+    store: &mut S,
+    address: &CanonicalAddr,
+    amount: Uint128,
+    position: u32,
+    token_address: HumanAddr,
+) -> StdResult<(Order, Order)> {
+    let contract_order = order_at_position(store, address, position)?;
+    let creator_order = order_at_position(
+        store,
+        &contract_order.creator,
+        contract_order.other_storage_position,
+    )?;
+    // Check the token is the same at the to_token
+    // Check the amount + filled amount is less than or equal to amount
+    if creator_order.status == 2 {
+        return Err(StdError::generic_err("Order already cancelled."));
+    }
+    if creator_order.status == 3 {
+        return Err(StdError::generic_err("Order already finalized."));
+    }
 
-//     Ok((from_order, to_order))
-// }
+    Ok((creator_order, contract_order))
+}
 
 pub fn verify_orders_for_cancel<S: Storage>(
     store: &mut S,
@@ -200,27 +198,6 @@ pub fn verify_orders_for_cancel<S: Storage>(
 
     Ok((creator_order, contract_order))
 }
-
-// pub fn verify_orders_for_confirm_address<A: Api, S: Storage>(
-//     api: &A,
-//     store: &mut S,
-//     address: &CanonicalAddr,
-//     position: u32,
-// ) -> StdResult<(Order, Order)> {
-//     let creator_order = order_at_position(store, address, position)?;
-//     let contract_order = order_at_position(store, &to_order.from, to_order.other_storage_position)?;
-//     authorize(
-//         api.human_address(&to_order.to_token)?,
-//         api.human_address(address)?,
-//     )?;
-//     if to_order.status != 0 {
-//         return Err(StdError::generic_err(
-//             "Order not waiting for address confirmation.",
-//         ));
-//     }
-
-//     Ok((from_order, to_order))
-// }
 
 fn append_order<S: Storage>(
     store: &mut S,
