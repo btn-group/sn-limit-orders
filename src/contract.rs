@@ -19,7 +19,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
         butt: msg.butt,
-        withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -153,7 +152,6 @@ mod tests {
         let msg = InitMsg {
             accepted_token: accepted_token.clone(),
             butt: mock_butt(),
-            withdrawal_allowed_from: 3,
         };
         (init(&mut deps, env.clone(), msg), deps)
     }
@@ -180,7 +178,6 @@ mod tests {
                 accepted_token: accepted_token,
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
-                withdrawal_allowed_from: 3
             },
             value
         );

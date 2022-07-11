@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub struct InitMsg {
     pub accepted_token: SecretContract,
     pub butt: SecretContract,
-    pub withdrawal_allowed_from: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
