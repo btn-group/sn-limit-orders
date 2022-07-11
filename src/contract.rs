@@ -1,11 +1,7 @@
-use crate::authorize::authorize;
 use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use crate::state::Config;
-use crate::transaction_history::{
-    get_txs, store_txs, update_tx, verify_txs, verify_txs_for_cancel,
-    verify_txs_for_confirm_address,
-};
+use crate::transaction_history::get_txs;
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
@@ -23,7 +19,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
         butt: msg.butt,
-        enabled: false,
         withdrawal_allowed_from: msg.withdrawal_allowed_from,
     };
     config_store.store(CONFIG_KEY, &config)?;
@@ -40,8 +35,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::Disable {} => disable(deps, env),
-        HandleMsg::Enable {} => enable(deps, env),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -80,40 +73,6 @@ pub fn correct_amount_of_token(
     }
 
     Ok(())
-}
-
-fn disable<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
-    let mut config: Config = config_store.load(CONFIG_KEY)?;
-    authorize(env.message.sender, config.admin.clone())?;
-
-    config.enabled = false;
-    config_store.store(CONFIG_KEY, &config)?;
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
-    })
-}
-
-fn enable<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
-    let mut config: Config = config_store.load(CONFIG_KEY)?;
-    authorize(env.message.sender, config.admin.clone())?;
-
-    config.enabled = true;
-    config_store.store(CONFIG_KEY, &config)?;
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
-    })
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
@@ -221,65 +180,10 @@ mod tests {
                 accepted_token: accepted_token,
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
-                enabled: false,
                 withdrawal_allowed_from: 3
             },
             value
         );
-    }
-
-    #[test]
-    fn test_disable() {
-        let (_init_result, mut deps) = init_helper();
-
-        // Initially false
-        let res = query(&deps, QueryMsg::Config {}).unwrap();
-        let mut config: Config = from_binary(&res).unwrap();
-
-        // when enabled
-        let mut msg = HandleMsg::Enable {};
-        handle(&mut deps, mock_env(config.admin.clone(), &[]), msg.clone()).unwrap();
-
-        // = when disabled
-        msg = HandleMsg::Disable {};
-        // == when called by a non-admin
-        // == * it raises an error
-        assert_eq!(
-            handle(&mut deps, mock_env("non-admin", &[]), msg.clone()).unwrap_err(),
-            StdError::Unauthorized { backtrace: None }
-        );
-
-        // == when called by an admin
-        // == * it disables the contract
-        handle(&mut deps, mock_env(config.admin, &[]), msg.clone()).unwrap();
-        config = from_binary(&res).unwrap();
-        assert_eq!(false, config.enabled);
-    }
-
-    #[test]
-    fn test_enable() {
-        let (_init_result, mut deps) = init_helper();
-
-        // Initially false
-        let mut res = query(&deps, QueryMsg::Config {}).unwrap();
-        let mut config: Config = from_binary(&res).unwrap();
-        assert_eq!(false, config.enabled);
-
-        let msg = HandleMsg::Enable {};
-        // when called by a non admin
-        // * it raises an error
-        let handle_response = handle(&mut deps, mock_env("non-admin", &[]), msg.clone());
-        assert_eq!(
-            handle_response.unwrap_err(),
-            StdError::Unauthorized { backtrace: None }
-        );
-
-        // when called by the admin
-        handle(&mut deps, mock_env(config.admin, &[]), msg.clone()).unwrap();
-        // * it enables the contract
-        res = query(&deps, QueryMsg::Config {}).unwrap();
-        config = from_binary(&res).unwrap();
-        assert_eq!(true, config.enabled);
     }
 
     #[test]
