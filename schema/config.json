@@ -3,14 +3,10 @@
   "title": "Config",
   "type": "object",
   "required": [
-    "accepted_token",
     "admin",
     "butt"
   ],
   "properties": {
-    "accepted_token": {
-      "$ref": "#/definitions/SecretContract"
-    },
     "admin": {
       "$ref": "#/definitions/HumanAddr"
     },

@@ -2,6 +2,7 @@ use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg};
 use crate::orders::get_orders;
 use crate::state::Config;
+use crate::state::SecretContract;
 use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier,
     StdError, StdResult, Storage, Uint128,
@@ -16,7 +17,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
-        accepted_token: msg.accepted_token.clone(),
         admin: env.message.sender,
         butt: msg.butt,
     };
@@ -37,6 +37,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
+        HandleMsg::RegisterTokens { tokens } => register_tokens(&env, tokens),
     }
 }
 
@@ -75,23 +76,35 @@ pub fn correct_amount_of_token(
 }
 
 fn receive<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _deps: &mut Extern<S, A, Q>,
+    _env: Env,
     _from: HumanAddr,
     _amount: Uint128,
     _msg: Binary,
 ) -> StdResult<HandleResponse> {
-    // Ensure that the sent tokens are from an expected contract address
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
-    if env.message.sender != config.accepted_token.address {
-        return Err(StdError::generic_err(format!(
-            "This token is not supported. Supported: {}, given: {}",
-            config.accepted_token.address, env.message.sender
-        )));
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
+fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleResponse> {
+    let mut messages = vec![];
+    for token in tokens {
+        let address = token.address;
+        let contract_hash = token.contract_hash;
+        messages.push(snip20::register_receive_msg(
+            env.contract_code_hash.clone(),
+            None,
+            BLOCK_SIZE,
+            contract_hash.clone(),
+            address.clone(),
+        )?);
     }
 
     Ok(HandleResponse {
-        messages: vec![],
+        messages,
         log: vec![],
         data: None,
     })
@@ -163,19 +176,33 @@ mod tests {
         }
     }
 
+    fn mock_contract() -> SecretContract {
+        let env = mock_env(mock_user_address(), &[]);
+        SecretContract {
+            address: env.contract.address,
+            contract_hash: env.contract_code_hash,
+        }
+    }
+
+    fn mock_token() -> SecretContract {
+        SecretContract {
+            address: HumanAddr::from("mock-token-address"),
+            contract_hash: "mock-token-contract-hash".to_string(),
+        }
+    }
+
+    fn mock_user_address() -> HumanAddr {
+        HumanAddr::from("gary")
+    }
+
     #[test]
     fn test_config() {
         let (_init_result, deps) = init_helper();
 
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: Config = from_binary(&res).unwrap();
-        let accepted_token = SecretContract {
-            address: HumanAddr::from(MOCK_ACCEPTED_TOKEN_ADDRESS),
-            contract_hash: MOCK_ACCEPTED_TOKEN_CONTRACT_HASH.to_string(),
-        };
         assert_eq!(
             Config {
-                accepted_token: accepted_token,
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
             },
@@ -184,43 +211,37 @@ mod tests {
     }
 
     #[test]
-    fn test_receive_accepted_token_callback() {
+    fn test_register_tokens() {
         let (_init_result, mut deps) = init_helper();
-        let amount: Uint128 = Uint128(333);
-        let from: HumanAddr = HumanAddr::from("someuser");
+        let env = mock_env(mock_user_address(), &[]);
 
-        // Test that only accepted token is accepted
-        // Not accepted token
-        let msg = HandleMsg::Receive {
-            amount: amount,
-            from: from.clone(),
-            sender: from.clone(),
-            msg: to_binary(&ReceiveMsg::Deposit {}).unwrap(),
+        // When tokens are in the parameter
+        let handle_msg = HandleMsg::RegisterTokens {
+            tokens: vec![mock_butt(), mock_token()],
         };
-        let handle_response = handle(&mut deps, mock_env("notasupportedtoken", &[]), msg.clone());
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        let handle_result_unwrapped = handle_result.unwrap();
+        // * it sends a message to register receive for the token and sets a viewing key
         assert_eq!(
-            handle_response.unwrap_err(),
-            StdError::GenericErr {
-                msg: format!(
-                    "This token is not supported. Supported: {}, given: {}",
-                    MOCK_ACCEPTED_TOKEN_ADDRESS, "notasupportedtoken"
-                ),
-                backtrace: None
-            }
+            handle_result_unwrapped.messages,
+            vec![
+                snip20::register_receive_msg(
+                    mock_contract().contract_hash.clone(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::register_receive_msg(
+                    mock_contract().contract_hash,
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap(),
+            ]
         );
-
-        // Accepted token
-        let msg = HandleMsg::Receive {
-            amount: amount,
-            from: from.clone(),
-            sender: from,
-            msg: to_binary(&ReceiveMsg::Deposit {}).unwrap(),
-        };
-        let handle_response = handle(
-            &mut deps,
-            mock_env(MOCK_ACCEPTED_TOKEN_ADDRESS, &[]),
-            msg.clone(),
-        );
-        handle_response.unwrap();
     }
 }
