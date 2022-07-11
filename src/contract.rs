@@ -82,14 +82,18 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
         None,
         BLOCK_SIZE,
-        creator_order.from_token.contract_hash,
-        creator_order.from_token.address,
+        creator_order.from_token.contract_hash.clone(),
+        creator_order.from_token.address.clone(),
     )?);
 
     // Update Txs
-    creator_order.status = 2;
-    contract_order.status = 2;
-    update_order(&mut deps.storage, &creator_order.creator, creator_order)?;
+    creator_order.cancelled = true;
+    contract_order.cancelled = true;
+    update_order(
+        &mut deps.storage,
+        &creator_order.creator.clone(),
+        creator_order,
+    )?;
     update_order(
         &mut deps.storage,
         &deps.api.canonical_address(&env.contract.address)?,
@@ -213,7 +217,6 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         deps.api.canonical_address(&from)?,
         amount,
         to_amount,
-        0,
         &env.block,
         deps.api.canonical_address(&env.contract.address)?,
     )?;
@@ -244,12 +247,8 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         env.message.sender.clone(),
     )?;
     // Update filled amount
-    // If filled amount is the same as amount set status to finalized
-    // But do we even need a status apart from cancelled as we can figured it out from partly_filled
     // Send fee?
 
-    // creator_order.status = 3;
-    // contract_order.status = 3;
     // update_tx(
     //     &mut deps.storage,
     //     &creator_order.from.clone(),
