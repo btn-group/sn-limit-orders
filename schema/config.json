@@ -6,7 +6,6 @@
     "accepted_token",
     "admin",
     "butt",
-    "enabled",
     "withdrawal_allowed_from"
   ],
   "properties": {
@@ -18,9 +17,6 @@
     },
     "butt": {
       "$ref": "#/definitions/SecretContract"
-    },
-    "enabled": {
-      "type": "boolean"
     },
     "withdrawal_allowed_from": {
       "type": "integer",
