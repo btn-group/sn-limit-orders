@@ -63,7 +63,8 @@
         "register_tokens": {
           "type": "object",
           "required": [
-            "tokens"
+            "tokens",
+            "viewing_key"
           ],
           "properties": {
             "tokens": {
@@ -71,6 +72,9 @@
               "items": {
                 "$ref": "#/definitions/SecretContract"
               }
+            },
+            "viewing_key": {
+              "type": "string"
             }
           }
         }
