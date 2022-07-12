@@ -9,7 +9,7 @@ use crate::state::{
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdResult, Storage, Uint128,
+    InitResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -238,6 +238,13 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     to_amount: Uint128,
     to_token: HumanAddr,
 ) -> StdResult<HandleResponse> {
+    let to_token_address_canonical = deps.api.canonical_address(&to_token)?;
+    let token_details: Option<RegisteredToken> =
+        read_registered_token(&deps.storage, &to_token_address_canonical);
+    if token_details.is_none() {
+        return Err(StdError::generic_err("To token is not registered."));
+    }
+
     store_orders(
         &mut deps.storage,
         env.message.sender.clone(),
@@ -321,7 +328,6 @@ mod tests {
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::StdError;
 
     pub const MOCK_ADMIN: &str = "admin";
     pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "buttonsmartcontractaddress";
