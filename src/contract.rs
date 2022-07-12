@@ -330,8 +330,6 @@ mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
 
     pub const MOCK_ADMIN: &str = "admin";
-    pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "buttonsmartcontractaddress";
-    pub const MOCK_ACCEPTED_TOKEN_CONTRACT_HASH: &str = "BUTT";
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
@@ -340,15 +338,8 @@ mod tests {
         Extern<MockStorage, MockApi, MockQuerier>,
     ) {
         let env = mock_env(MOCK_ADMIN, &[]);
-        let accepted_token = SecretContract {
-            address: HumanAddr::from(MOCK_ACCEPTED_TOKEN_ADDRESS),
-            contract_hash: MOCK_ACCEPTED_TOKEN_CONTRACT_HASH.to_string(),
-        };
         let mut deps = mock_dependencies(20, &[]);
-        let msg = InitMsg {
-            accepted_token: accepted_token.clone(),
-            butt: mock_butt(),
-        };
+        let msg = InitMsg { butt: mock_butt() };
         (init(&mut deps, env.clone(), msg), deps)
     }
 
@@ -390,6 +381,36 @@ mod tests {
                 butt: mock_butt(),
             },
             value
+        );
+    }
+
+    #[test]
+    fn test_create_order() {
+        let (_init_result, mut deps) = init_helper();
+
+        // when tokens are registered
+        test_register_tokens();
+
+        // = when to_token isn't registered
+        let receive_msg = ReceiveMsg::CreateOrder {
+            to_amount: Uint128(1),
+            to_token: mock_user_address(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(555),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // = * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("To token is not registered.")
         );
     }
 

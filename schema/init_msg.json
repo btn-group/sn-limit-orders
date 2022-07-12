@@ -3,13 +3,9 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "accepted_token",
     "butt"
   ],
   "properties": {
-    "accepted_token": {
-      "$ref": "#/definitions/SecretContract"
-    },
     "butt": {
       "$ref": "#/definitions/SecretContract"
     }
