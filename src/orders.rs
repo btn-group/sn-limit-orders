@@ -19,6 +19,7 @@ pub struct HumanizedOrder {
     pub block_time: u64,
     pub block_height: u64,
     pub cancelled: bool,
+    pub fee: Uint128,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -34,6 +35,7 @@ pub struct Order {
     pub block_time: u64,
     pub block_height: u64,
     pub cancelled: bool,
+    pub fee: Uint128,
 }
 impl Order {
     fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
@@ -48,6 +50,7 @@ impl Order {
             block_time: self.block_time,
             block_height: self.block_height,
             cancelled: self.cancelled,
+            fee: self.fee,
         })
     }
 }
@@ -96,6 +99,7 @@ pub fn store_orders<S: Storage>(
     to_amount: Uint128,
     block: &cosmwasm_std::BlockInfo,
     contract_address: CanonicalAddr,
+    fee: Uint128,
 ) -> StdResult<()> {
     let creator_position = get_next_position(store, &creator)?;
     let contract_address_position = get_next_position(store, &contract_address)?;
@@ -111,6 +115,7 @@ pub fn store_orders<S: Storage>(
         block_time: block.time,
         block_height: block.height,
         cancelled: false,
+        fee: fee,
     };
     append_order(store, &from_order, &creator)?;
     let mut to_order = from_order;
@@ -166,10 +171,10 @@ pub fn verify_orders_for_fill<A: Api, S: Storage>(
     // Check the token is the same at the to_token
     // Check the amount + filled amount is less than or equal to amount
     if creator_order.cancelled {
-        return Err(StdError::generic_err("Order already cancelled."));
+        return Err(StdError::generic_err("Order has been cancelled."));
     }
     if creator_order.amount == creator_order.filled_amount {
-        return Err(StdError::generic_err("Order has been filled."));
+        return Err(StdError::generic_err("Order already filled."));
     }
 
     Ok((creator_order, contract_order))

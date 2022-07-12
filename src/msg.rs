@@ -52,6 +52,7 @@ pub enum QueryMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
     CreateOrder {
+        butt_viewing_key: String,
         to_amount: Uint128,
         to_token: HumanAddr,
     },

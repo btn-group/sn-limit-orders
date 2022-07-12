@@ -67,6 +67,55 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
+fn receive<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    from: HumanAddr,
+    amount: Uint128,
+    msg: Binary,
+) -> StdResult<HandleResponse> {
+    let msg: ReceiveMsg = from_binary(&msg)?;
+    let response = match msg {
+        ReceiveMsg::CreateOrder {
+            butt_viewing_key,
+            to_amount,
+            to_token,
+        } => create_order(
+            deps,
+            &env,
+            from,
+            amount,
+            butt_viewing_key,
+            to_amount,
+            to_token,
+        ),
+        ReceiveMsg::Fill { position } => fill_order(deps, &env, from, amount, position),
+    };
+    pad_response(response)
+}
+
+fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
+    let user_butt_balance_as_u128: u128 = user_butt_balance.u128();
+    let fee_percentage = if user_butt_balance_as_u128 >= 100_000_000_000 {
+        0
+    } else if user_butt_balance_as_u128 >= 50_000_000_000 {
+        6
+    } else if user_butt_balance_as_u128 >= 25_000_000_000 {
+        12
+    } else if user_butt_balance_as_u128 >= 12_500_000_000 {
+        18
+    } else if user_butt_balance_as_u128 >= 6_250_000_000 {
+        24
+    } else {
+        30
+    };
+    if fee_percentage > 0 {
+        Uint128(to_amount.u128() * fee_percentage / 10_000)
+    } else {
+        Uint128(0)
+    }
+}
+
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
@@ -115,129 +164,16 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn orders<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
-    key: String,
-    page: u32,
-    page_size: u32,
-) -> StdResult<Binary> {
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-
-    // This is here so that the user can use their viewing key for butt for this
-    snip20::balance_query(
-        &deps.querier,
-        address.clone(),
-        key.to_string(),
-        BLOCK_SIZE,
-        config.butt.contract_hash,
-        config.butt.address,
-    )?;
-
-    let address = deps.api.canonical_address(&address)?;
-    let (orders, total) = get_orders(&deps.api, &deps.storage, &address, page, page_size)?;
-
-    let result = QueryAnswer::Orders {
-        orders,
-        total: Some(total),
-    };
-    to_binary(&result)
-}
-
-fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse> {
-    response.map(|mut response| {
-        response.data = response.data.map(|mut data| {
-            space_pad(BLOCK_SIZE, &mut data.0);
-            data
-        });
-        response
-    })
-}
-
-fn receive<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    from: HumanAddr,
-    amount: Uint128,
-    msg: Binary,
-) -> StdResult<HandleResponse> {
-    let msg: ReceiveMsg = from_binary(&msg)?;
-    let response = match msg {
-        ReceiveMsg::CreateOrder {
-            to_amount,
-            to_token,
-        } => create_order(deps, &env, from, amount, to_amount, to_token),
-        ReceiveMsg::Fill { position } => fill_order(deps, &env, from, amount, position),
-    };
-    pad_response(response)
-}
-
-fn register_tokens<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: &Env,
-    tokens: Vec<SecretContract>,
-    viewing_key: String,
-) -> StdResult<HandleResponse> {
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(env.message.sender.clone(), config.admin)?;
-    let mut messages = vec![];
-    for token in tokens {
-        let token_address_canonical = deps.api.canonical_address(&token.address)?;
-        let token_details: Option<RegisteredToken> =
-            read_registered_token(&deps.storage, &token_address_canonical);
-        if token_details.is_none() {
-            let token_details: RegisteredToken = RegisteredToken {
-                address: token.address.clone(),
-                contract_hash: token.contract_hash.clone(),
-                sum_balance: Uint128(0),
-            };
-            write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
-            messages.push(snip20::register_receive_msg(
-                env.contract_code_hash.clone(),
-                None,
-                BLOCK_SIZE,
-                token.contract_hash.clone(),
-                token.address.clone(),
-            )?);
-        }
-        messages.push(snip20::set_viewing_key_msg(
-            viewing_key.clone(),
-            None,
-            BLOCK_SIZE,
-            token.contract_hash,
-            token.address,
-        )?);
-    }
-
-    Ok(HandleResponse {
-        messages,
-        log: vec![],
-        data: None,
-    })
-}
-
-// Take a Vec<u8> and pad it up to a multiple of `block_size`, using spaces at the end.
-fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
-    let len = message.len();
-    let surplus = len % block_size;
-    if surplus == 0 {
-        return message;
-    }
-
-    let missing = block_size - surplus;
-    message.reserve(missing);
-    message.extend(std::iter::repeat(b' ').take(missing));
-    message
-}
-
 fn create_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     from: HumanAddr,
     amount: Uint128,
+    butt_viewing_key: String,
     to_amount: Uint128,
     to_token: HumanAddr,
 ) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let to_token_address_canonical = deps.api.canonical_address(&to_token)?;
     let token_details: Option<RegisteredToken> =
         read_registered_token(&deps.storage, &to_token_address_canonical);
@@ -245,6 +181,16 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("To token is not registered."));
     }
 
+    let user_butt_balance: Uint128 = snip20::balance_query(
+        &deps.querier,
+        from.clone(),
+        butt_viewing_key,
+        BLOCK_SIZE,
+        config.butt.contract_hash,
+        config.butt.address,
+    )?
+    .amount;
+    let fee = calculate_fee(user_butt_balance, to_amount);
     store_orders(
         &mut deps.storage,
         env.message.sender.clone(),
@@ -254,6 +200,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         to_amount,
         &env.block,
         deps.api.canonical_address(&env.contract.address)?,
+        fee,
     )?;
 
     Ok(HandleResponse {
@@ -320,6 +267,103 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
     })
+}
+
+fn orders<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+
+    // This is here so that the user can use their viewing key for butt for this
+    snip20::balance_query(
+        &deps.querier,
+        address.clone(),
+        key.to_string(),
+        BLOCK_SIZE,
+        config.butt.contract_hash,
+        config.butt.address,
+    )?;
+
+    let address = deps.api.canonical_address(&address)?;
+    let (orders, total) = get_orders(&deps.api, &deps.storage, &address, page, page_size)?;
+
+    let result = QueryAnswer::Orders {
+        orders,
+        total: Some(total),
+    };
+    to_binary(&result)
+}
+
+fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse> {
+    response.map(|mut response| {
+        response.data = response.data.map(|mut data| {
+            space_pad(BLOCK_SIZE, &mut data.0);
+            data
+        });
+        response
+    })
+}
+
+fn register_tokens<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    tokens: Vec<SecretContract>,
+    viewing_key: String,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    authorize(env.message.sender.clone(), config.admin)?;
+    let mut messages = vec![];
+    for token in tokens {
+        let token_address_canonical = deps.api.canonical_address(&token.address)?;
+        let token_details: Option<RegisteredToken> =
+            read_registered_token(&deps.storage, &token_address_canonical);
+        if token_details.is_none() {
+            let token_details: RegisteredToken = RegisteredToken {
+                address: token.address.clone(),
+                contract_hash: token.contract_hash.clone(),
+                sum_balance: Uint128(0),
+            };
+            write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
+            messages.push(snip20::register_receive_msg(
+                env.contract_code_hash.clone(),
+                None,
+                BLOCK_SIZE,
+                token.contract_hash.clone(),
+                token.address.clone(),
+            )?);
+        }
+        messages.push(snip20::set_viewing_key_msg(
+            viewing_key.clone(),
+            None,
+            BLOCK_SIZE,
+            token.contract_hash,
+            token.address,
+        )?);
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+// Take a Vec<u8> and pad it up to a multiple of `block_size`, using spaces at the end.
+fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
+    let len = message.len();
+    let surplus = len % block_size;
+    if surplus == 0 {
+        return message;
+    }
+
+    let missing = block_size - surplus;
+    message.reserve(missing);
+    message.extend(std::iter::repeat(b' ').take(missing));
+    message
 }
 
 #[cfg(test)]
@@ -393,6 +437,7 @@ mod tests {
 
         // = when to_token isn't registered
         let receive_msg = ReceiveMsg::CreateOrder {
+            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
             to_amount: Uint128(1),
             to_token: mock_user_address(),
         };
