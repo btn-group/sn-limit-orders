@@ -9,7 +9,7 @@ use crate::state::{
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdResult, Storage, Uint128,
+    InitResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -238,6 +238,13 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     to_amount: Uint128,
     to_token: HumanAddr,
 ) -> StdResult<HandleResponse> {
+    let to_token_address_canonical = deps.api.canonical_address(&to_token)?;
+    let token_details: Option<RegisteredToken> =
+        read_registered_token(&deps.storage, &to_token_address_canonical);
+    if token_details.is_none() {
+        return Err(StdError::generic_err("To token is not registered."));
+    }
+
     store_orders(
         &mut deps.storage,
         env.message.sender.clone(),
@@ -321,11 +328,8 @@ mod tests {
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::StdError;
 
     pub const MOCK_ADMIN: &str = "admin";
-    pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "buttonsmartcontractaddress";
-    pub const MOCK_ACCEPTED_TOKEN_CONTRACT_HASH: &str = "BUTT";
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
@@ -334,15 +338,8 @@ mod tests {
         Extern<MockStorage, MockApi, MockQuerier>,
     ) {
         let env = mock_env(MOCK_ADMIN, &[]);
-        let accepted_token = SecretContract {
-            address: HumanAddr::from(MOCK_ACCEPTED_TOKEN_ADDRESS),
-            contract_hash: MOCK_ACCEPTED_TOKEN_CONTRACT_HASH.to_string(),
-        };
         let mut deps = mock_dependencies(20, &[]);
-        let msg = InitMsg {
-            accepted_token: accepted_token.clone(),
-            butt: mock_butt(),
-        };
+        let msg = InitMsg { butt: mock_butt() };
         (init(&mut deps, env.clone(), msg), deps)
     }
 
@@ -384,6 +381,36 @@ mod tests {
                 butt: mock_butt(),
             },
             value
+        );
+    }
+
+    #[test]
+    fn test_create_order() {
+        let (_init_result, mut deps) = init_helper();
+
+        // when tokens are registered
+        test_register_tokens();
+
+        // = when to_token isn't registered
+        let receive_msg = ReceiveMsg::CreateOrder {
+            to_amount: Uint128(1),
+            to_token: mock_user_address(),
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(555),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // = * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("To token is not registered.")
         );
     }
 
