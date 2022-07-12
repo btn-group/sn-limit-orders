@@ -1,21 +1,17 @@
 use crate::authorize::authorize;
-use crate::constants::PREFIX_ORDERS;
-use crate::constants::{BLOCK_SIZE, CONFIG_KEY};
+use crate::constants::{BLOCK_SIZE, CONFIG_KEY, PREFIX_ORDERS};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
-use crate::state::HumanizedOrder;
-use crate::state::Order;
 use crate::state::{
-    read_registered_token, write_registered_token, Config, RegisteredToken, SecretContract,
+    read_registered_token, write_registered_token, Config, HumanizedOrder, Order, RegisteredToken,
+    SecretContract,
 };
 use cosmwasm_std::{
-    from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse,
+    HumanAddr, InitResponse, Querier, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
-use cosmwasm_std::{CanonicalAddr, ReadonlyStorage};
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use secret_toolkit::snip20;
-use secret_toolkit::storage::{AppendStore, AppendStoreMut};
-use secret_toolkit::storage::{TypedStore, TypedStoreMut};
+use secret_toolkit::storage::{AppendStore, AppendStoreMut, TypedStore, TypedStoreMut};
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -95,6 +91,16 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         ReceiveMsg::Fill { position } => fill_order(deps, &env, from, amount, position),
     };
     pad_response(response)
+}
+
+fn append_order<S: Storage>(
+    store: &mut S,
+    order: &Order,
+    for_address: &CanonicalAddr,
+) -> StdResult<()> {
+    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
+    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
+    store.push(order)
 }
 
 fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
@@ -272,6 +278,60 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> StdResult<u32> {
+    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
+    let store = AppendStoreMut::<Order, _>::attach_or_create(&mut store)?;
+    Ok(store.len())
+}
+
+// Storage functions:
+fn get_orders<A: Api, S: ReadonlyStorage>(
+    api: &A,
+    storage: &S,
+    for_address: &CanonicalAddr,
+    page: u32,
+    page_size: u32,
+) -> StdResult<(Vec<HumanizedOrder>, u64)> {
+    let store =
+        ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], storage);
+
+    // Try to access the storage of orders for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStore::<Order, _, _>::attach(&store);
+    let store = if let Some(result) = store {
+        result?
+    } else {
+        return Ok((vec![], 0));
+    };
+
+    // Take `page_size` orders starting from the latest Order, potentially skipping `page * page_size`
+    // orders from the start.
+    let order_iter = store
+        .iter()
+        .rev()
+        .skip((page * page_size) as _)
+        .take(page_size as _);
+
+    // The `and_then` here flattens the `StdResult<StdResult<RichOrder>>` to an `StdResult<RichOrder>`
+    let orders: StdResult<Vec<HumanizedOrder>> = order_iter
+        .map(|order| order.map(|order| order.into_humanized(api)).and_then(|x| x))
+        .collect();
+    orders.map(|orders| (orders, store.len() as u64))
+}
+
+fn order_at_position<S: Storage>(
+    store: &mut S,
+    address: &CanonicalAddr,
+    position: u32,
+) -> StdResult<Order> {
+    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
+    // Try to access the storage of orders for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut store)?;
+
+    Ok(store.get_at(position)?)
+}
+
 fn orders<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
@@ -369,41 +429,6 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
     message
 }
 
-// Storage functions:
-fn get_orders<A: Api, S: ReadonlyStorage>(
-    api: &A,
-    storage: &S,
-    for_address: &CanonicalAddr,
-    page: u32,
-    page_size: u32,
-) -> StdResult<(Vec<HumanizedOrder>, u64)> {
-    let store =
-        ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], storage);
-
-    // Try to access the storage of orders for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStore::<Order, _, _>::attach(&store);
-    let store = if let Some(result) = store {
-        result?
-    } else {
-        return Ok((vec![], 0));
-    };
-
-    // Take `page_size` orders starting from the latest Order, potentially skipping `page * page_size`
-    // orders from the start.
-    let order_iter = store
-        .iter()
-        .rev()
-        .skip((page * page_size) as _)
-        .take(page_size as _);
-
-    // The `and_then` here flattens the `StdResult<StdResult<RichOrder>>` to an `StdResult<RichOrder>`
-    let orders: StdResult<Vec<HumanizedOrder>> = order_iter
-        .map(|order| order.map(|order| order.into_humanized(api)).and_then(|x| x))
-        .collect();
-    orders.map(|orders| (orders, store.len() as u64))
-}
-
 fn store_orders<S: Storage>(
     store: &mut S,
     from_token: HumanAddr,
@@ -438,19 +463,6 @@ fn store_orders<S: Storage>(
     append_order(store, &to_order, &contract_address)?;
 
     Ok(())
-}
-
-fn order_at_position<S: Storage>(
-    store: &mut S,
-    address: &CanonicalAddr,
-    position: u32,
-) -> StdResult<Order> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
-    // Try to access the storage of orders for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut store)?;
-
-    Ok(store.get_at(position)?)
 }
 
 fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order) -> StdResult<()> {
@@ -510,22 +522,6 @@ fn verify_orders_for_cancel<S: Storage>(
     }
 
     Ok((creator_order, contract_order))
-}
-
-fn append_order<S: Storage>(
-    store: &mut S,
-    order: &Order,
-    for_address: &CanonicalAddr,
-) -> StdResult<()> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
-    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
-    store.push(order)
-}
-
-fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> StdResult<u32> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
-    let store = AppendStoreMut::<Order, _>::attach_or_create(&mut store)?;
-    Ok(store.len())
 }
 
 #[cfg(test)]
