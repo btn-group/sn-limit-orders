@@ -1,6 +1,6 @@
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use cw_secret_network_escrow_trade_smart_contract::msg::{HandleMsg, InitMsg, QueryMsg};
-use cw_secret_network_escrow_trade_smart_contract::state::Config;
+use cw_secret_network_limit_orders::msg::{HandleMsg, InitMsg, QueryMsg};
+use cw_secret_network_limit_orders::state::Config;
 use std::env::current_dir;
 use std::fs::create_dir_all;
 
