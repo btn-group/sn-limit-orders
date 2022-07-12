@@ -2,7 +2,6 @@ mod authorize;
 mod constants;
 pub mod contract;
 pub mod msg;
-mod orders;
 pub mod state;
 
 #[cfg(target_arch = "wasm32")]
