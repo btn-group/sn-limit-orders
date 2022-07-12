@@ -5,27 +5,6 @@
     {
       "type": "object",
       "required": [
-        "cancel"
-      ],
-      "properties": {
-        "cancel": {
-          "type": "object",
-          "required": [
-            "position"
-          ],
-          "properties": {
-            "position": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0.0
-            }
-          }
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
         "receive"
       ],
       "properties": {

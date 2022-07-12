@@ -39,7 +39,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::Cancel { position } => cancel_order(deps, &env, position),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -77,6 +76,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let msg: ReceiveMsg = from_binary(&msg)?;
     let response = match msg {
+        ReceiveMsg::CancelOrder { position } => cancel_order(deps, &env, from, amount, position),
         ReceiveMsg::CreateOrder {
             butt_viewing_key,
             to_amount,
@@ -130,6 +130,8 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
     let (mut creator_order, mut contract_order) = verify_orders_for_cancel(
@@ -587,6 +589,14 @@ mod tests {
 
     fn mock_user_address() -> HumanAddr {
         HumanAddr::from("gary")
+    }
+
+    // === UNIT TESTS ===
+    #[test]
+    fn test_cancel_order() {
+        let (_init_result, mut deps) = init_helper(true);
+
+        // When order exists
     }
 
     #[test]
