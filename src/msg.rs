@@ -24,6 +24,7 @@ pub enum HandleMsg {
     },
     RegisterTokens {
         tokens: Vec<SecretContract>,
+        viewing_key: String,
     },
 }
 
@@ -58,10 +59,4 @@ pub enum ReceiveMsg {
     Fill {
         position: u32,
     },
-}
-
-// QUERY RESPONSE STRUCTS
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct BalanceResponse {
-    pub amount: Uint128,
 }

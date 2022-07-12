@@ -1,7 +1,5 @@
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use cw_secret_network_escrow_trade_smart_contract::msg::{
-    BalanceResponse, HandleMsg, InitMsg, QueryMsg,
-};
+use cw_secret_network_escrow_trade_smart_contract::msg::{HandleMsg, InitMsg, QueryMsg};
 use cw_secret_network_escrow_trade_smart_contract::state::Config;
 use std::env::current_dir;
 use std::fs::create_dir_all;
@@ -15,6 +13,5 @@ fn main() {
     export_schema(&schema_for!(InitMsg), &out_dir);
     export_schema(&schema_for!(HandleMsg), &out_dir);
     export_schema(&schema_for!(QueryMsg), &out_dir);
-    export_schema(&schema_for!(BalanceResponse), &out_dir);
     export_schema(&schema_for!(Config), &out_dir);
 }

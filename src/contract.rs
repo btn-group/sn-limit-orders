@@ -4,12 +4,12 @@ use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
 use crate::orders::{
     get_orders, store_orders, update_order, verify_orders_for_cancel, verify_orders_for_fill,
 };
-use crate::state::Config;
-use crate::state::SecretContract;
-use cosmwasm_std::CosmosMsg;
+use crate::state::{
+    read_registered_token, write_registered_token, Config, RegisteredToken, SecretContract,
+};
 use cosmwasm_std::{
-    from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    Querier, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, Querier, StdResult, Storage, Uint128,
 };
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
@@ -42,7 +42,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
-        HandleMsg::RegisterTokens { tokens } => register_tokens(&env, tokens),
+        HandleMsg::RegisterTokens {
+            tokens,
+            viewing_key,
+        } => register_tokens(deps, &env, tokens, viewing_key),
     }
 }
 
@@ -164,17 +167,40 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     pad_response(response)
 }
 
-fn register_tokens(env: &Env, tokens: Vec<SecretContract>) -> StdResult<HandleResponse> {
+fn register_tokens<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    tokens: Vec<SecretContract>,
+    viewing_key: String,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    authorize(env.message.sender.clone(), config.admin)?;
     let mut messages = vec![];
     for token in tokens {
-        let address = token.address;
-        let contract_hash = token.contract_hash;
-        messages.push(snip20::register_receive_msg(
-            env.contract_code_hash.clone(),
+        let token_address_canonical = deps.api.canonical_address(&token.address)?;
+        let token_details: Option<RegisteredToken> =
+            read_registered_token(&deps.storage, &token_address_canonical);
+        if token_details.is_none() {
+            let token_details: RegisteredToken = RegisteredToken {
+                address: token.address.clone(),
+                contract_hash: token.contract_hash.clone(),
+                sum_balance: Uint128(0),
+            };
+            write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
+            messages.push(snip20::register_receive_msg(
+                env.contract_code_hash.clone(),
+                None,
+                BLOCK_SIZE,
+                token.contract_hash.clone(),
+                token.address.clone(),
+            )?);
+        }
+        messages.push(snip20::set_viewing_key_msg(
+            viewing_key.clone(),
             None,
             BLOCK_SIZE,
-            contract_hash.clone(),
-            address.clone(),
+            token.contract_hash,
+            token.address,
         )?);
     }
 
@@ -290,14 +316,15 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
+    use cosmwasm_std::StdError;
 
     pub const MOCK_ADMIN: &str = "admin";
-    pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "sefismartcontractaddress";
-    pub const MOCK_ACCEPTED_TOKEN_CONTRACT_HASH: &str = "Buttcoin";
+    pub const MOCK_ACCEPTED_TOKEN_ADDRESS: &str = "buttonsmartcontractaddress";
+    pub const MOCK_ACCEPTED_TOKEN_CONTRACT_HASH: &str = "BUTT";
+    pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
     fn init_helper() -> (
@@ -361,20 +388,61 @@ mod tests {
     #[test]
     fn test_register_tokens() {
         let (_init_result, mut deps) = init_helper();
-        let env = mock_env(mock_user_address(), &[]);
 
         // When tokens are in the parameter
         let handle_msg = HandleMsg::RegisterTokens {
             tokens: vec![mock_butt(), mock_token()],
+            viewing_key: MOCK_VIEWING_KEY.to_string(),
         };
-        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // = when called by a non-admin
+        // = * it raises an Unauthorized error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_user_address(), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // = when called by the admin
+        let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg.clone());
         let handle_result_unwrapped = handle_result.unwrap();
-        // * it sends a message to register receive for the token and sets a viewing key
+        // == when tokens are not registered
+        // == * it stores the registered tokens
+        assert_eq!(
+            read_registered_token(
+                &deps.storage,
+                &deps.api.canonical_address(&mock_butt().address).unwrap()
+            )
+            .is_some(),
+            true
+        );
+        assert_eq!(
+            read_registered_token(
+                &deps.storage,
+                &deps.api.canonical_address(&mock_token().address).unwrap()
+            )
+            .is_some(),
+            true
+        );
+
+        // == * it registers the contract with the tokens
+        // == * it sets the viewing key for the contract with the tokens
         assert_eq!(
             handle_result_unwrapped.messages,
             vec![
                 snip20::register_receive_msg(
                     mock_contract().contract_hash.clone(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::set_viewing_key_msg(
+                    MOCK_VIEWING_KEY.to_string(),
                     None,
                     BLOCK_SIZE,
                     mock_butt().contract_hash,
@@ -389,6 +457,59 @@ mod tests {
                     mock_token().address,
                 )
                 .unwrap(),
+                snip20::set_viewing_key_msg(
+                    MOCK_VIEWING_KEY.to_string(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap()
+            ]
+        );
+
+        // === context when tokens are registered
+        let mut registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps.api.canonical_address(&mock_token().address).unwrap(),
+        )
+        .unwrap();
+        registered_token.sum_balance = Uint128(5);
+        write_registered_token(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_token().address).unwrap(),
+            registered_token,
+        )
+        .unwrap();
+        let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg);
+        let handle_result_unwrapped = handle_result.unwrap();
+        // === * it does not change the registered token's sum_balance
+        let registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps.api.canonical_address(&mock_token().address).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(registered_token.sum_balance, Uint128(5));
+        // === * it sets the viewing key for the contract with the tokens
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![
+                snip20::set_viewing_key_msg(
+                    MOCK_VIEWING_KEY.to_string(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::set_viewing_key_msg(
+                    MOCK_VIEWING_KEY.to_string(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap()
             ]
         );
     }
