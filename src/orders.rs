@@ -1,5 +1,4 @@
 use crate::constants::PREFIX_ORDERS;
-use crate::state::SecretContract;
 use cosmwasm_std::{
     Api, CanonicalAddr, HumanAddr, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
@@ -12,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub struct HumanizedOrder {
     pub creator: HumanAddr,
     pub position: u32,
-    pub from_token: SecretContract,
-    pub to_token: SecretContract,
+    pub from_token: HumanAddr,
+    pub to_token: HumanAddr,
     pub amount: Uint128,
     pub filled_amount: Uint128,
     pub to_amount: Uint128,
@@ -27,8 +26,8 @@ pub struct Order {
     pub creator: CanonicalAddr,
     pub position: u32,
     pub other_storage_position: u32,
-    pub from_token: SecretContract,
-    pub to_token: SecretContract,
+    pub from_token: HumanAddr,
+    pub to_token: HumanAddr,
     pub amount: Uint128,
     pub filled_amount: Uint128,
     pub to_amount: Uint128,
@@ -90,8 +89,8 @@ pub fn get_orders<A: Api, S: ReadonlyStorage>(
 
 pub fn store_orders<S: Storage>(
     store: &mut S,
-    from_token: SecretContract,
-    to_token: SecretContract,
+    from_token: HumanAddr,
+    to_token: HumanAddr,
     creator: CanonicalAddr,
     amount: Uint128,
     to_amount: Uint128,

@@ -78,6 +78,11 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&env.contract.address)?,
         position,
     )?;
+    let from_token: RegisteredToken = read_registered_token(
+        &deps.storage,
+        &deps.api.canonical_address(&creator_order.from_token)?,
+    )
+    .unwrap();
     // Send refund to the creator
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
@@ -85,8 +90,8 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
         None,
         BLOCK_SIZE,
-        creator_order.from_token.contract_hash.clone(),
-        creator_order.from_token.address.clone(),
+        from_token.contract_hash,
+        from_token.address,
     )?);
 
     // Update Txs
@@ -231,14 +236,11 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     from: HumanAddr,
     amount: Uint128,
     to_amount: Uint128,
-    to_token: SecretContract,
+    to_token: HumanAddr,
 ) -> StdResult<HandleResponse> {
     store_orders(
         &mut deps.storage,
-        SecretContract {
-            address: env.message.sender.clone(),
-            contract_hash: "CHANGETHISLATER".to_string(),
-        },
+        env.message.sender.clone(),
         to_token,
         deps.api.canonical_address(&from)?,
         amount,

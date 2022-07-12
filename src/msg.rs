@@ -54,7 +54,7 @@ pub enum QueryMsg {
 pub enum ReceiveMsg {
     CreateOrder {
         to_amount: Uint128,
-        to_token: SecretContract,
+        to_token: HumanAddr,
     },
     Fill {
         position: u32,
