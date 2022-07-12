@@ -1,5 +1,4 @@
-use crate::orders::HumanizedOrder;
-use crate::state::SecretContract;
+use crate::state::{HumanizedOrder, SecretContract};
 use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
