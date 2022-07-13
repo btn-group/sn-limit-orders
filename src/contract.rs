@@ -296,8 +296,12 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if creator_order.from_amount == creator_order.from_amount_filled {
-        return Err(StdError::generic_err("Order already filled."));
+    let unfilled_amount: Uint128 =
+        (creator_order.net_to_amount - creator_order.net_to_amount_filled)?;
+    if amount > unfilled_amount {
+        return Err(StdError::generic_err(
+            "Amount is greater than unfilled amount.",
+        ));
     }
 
     // Update filled amount
@@ -998,7 +1002,7 @@ mod tests {
         // = when amount sent in is positive
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
-            from: config.admin,
+            from: config.admin.clone(),
             amount: Uint128(1),
             msg: to_binary(&receive_msg).unwrap(),
         };
@@ -1065,6 +1069,39 @@ mod tests {
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("Order already cancelled.")
+        );
+        // ==== when order is not cancelled
+        creator_order.cancelled = false;
+        contract_order.cancelled = false;
+        creator_order.net_to_amount_filled = Uint128(1);
+        contract_order.net_to_amount_filled = Uint128(1);
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        // ===== when amount sent in is greater than unfilled amount
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin,
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // ===== * it raises an error
+        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Amount is greater than unfilled amount.")
         );
     }
 
