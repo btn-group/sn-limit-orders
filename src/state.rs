@@ -53,13 +53,14 @@ pub struct HumanizedOrder {
     pub position: u32,
     pub from_token: HumanAddr,
     pub to_token: HumanAddr,
-    pub amount: Uint128,
-    pub filled_amount: Uint128,
-    pub to_amount: Uint128,
-    pub block_time: u64,
-    pub block_height: u64,
+    pub from_amount: Uint128,
+    pub from_amount_filled: Uint128,
+    pub net_to_amount: Uint128,
+    pub net_to_amount_filled: Uint128,
     pub cancelled: bool,
     pub fee: Uint128,
+    pub block_time: u64,
+    pub block_height: u64,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -69,13 +70,14 @@ pub struct Order {
     pub other_storage_position: u32,
     pub from_token: HumanAddr,
     pub to_token: HumanAddr,
-    pub amount: Uint128,
-    pub filled_amount: Uint128,
-    pub to_amount: Uint128,
-    pub block_time: u64,
-    pub block_height: u64,
+    pub from_amount: Uint128,
+    pub from_amount_filled: Uint128,
+    pub net_to_amount: Uint128,
+    pub net_to_amount_filled: Uint128,
     pub cancelled: bool,
     pub fee: Uint128,
+    pub block_time: u64,
+    pub block_height: u64,
 }
 impl Order {
     pub fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
@@ -84,13 +86,14 @@ impl Order {
             position: self.position,
             from_token: self.from_token,
             to_token: self.to_token,
-            amount: self.amount,
-            filled_amount: self.filled_amount,
-            to_amount: self.to_amount,
-            block_time: self.block_time,
-            block_height: self.block_height,
+            from_amount: self.from_amount,
+            from_amount_filled: self.from_amount_filled,
+            net_to_amount: self.net_to_amount,
+            net_to_amount_filled: self.net_to_amount_filled,
             cancelled: self.cancelled,
             fee: self.fee,
+            block_time: self.block_time,
+            block_height: self.block_height,
         })
     }
 }

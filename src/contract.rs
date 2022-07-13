@@ -156,7 +156,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if creator_order.amount == creator_order.filled_amount {
+    if creator_order.from_amount == creator_order.from_amount_filled {
         return Err(StdError::generic_err("Order already filled."));
     }
 
@@ -169,7 +169,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&creator_order.creator)?,
-        (creator_order.amount - creator_order.filled_amount)?,
+        (creator_order.from_amount - creator_order.from_amount_filled)?,
         None,
         BLOCK_SIZE,
         from_token.contract_hash,
@@ -201,7 +201,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     from: HumanAddr,
-    amount: Uint128,
+    from_amount: Uint128,
     butt_viewing_key: String,
     to_amount: Uint128,
     to_token: HumanAddr,
@@ -223,7 +223,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
     let mut from_token_details: RegisteredToken =
         read_registered_token(&deps.storage, &from_token_address_canonical).unwrap();
-    from_token_details.sum_balance += amount;
+    from_token_details.sum_balance += from_amount;
     write_registered_token(
         &mut deps.storage,
         &from_token_address_canonical,
@@ -241,9 +241,10 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         from_token: env.message.sender.clone(),
         to_token: to_token,
         creator: creator_address.clone(),
-        amount: amount,
-        filled_amount: Uint128::zero(),
-        to_amount: to_amount,
+        from_amount,
+        from_amount_filled: Uint128::zero(),
+        net_to_amount: (to_amount - fee)?,
+        net_to_amount_filled: Uint128::zero(),
         block_time: env.block.time,
         block_height: env.block.height,
         cancelled: false,
@@ -295,7 +296,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if creator_order.amount == creator_order.filled_amount {
+    if creator_order.from_amount == creator_order.from_amount_filled {
         return Err(StdError::generic_err("Order already filled."));
     }
 
@@ -326,7 +327,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     // )?);
     // messages.push(snip20::transfer_msg(
     //     deps.api.human_address(&creator_order.to)?,
-    //     creator_order.amount,
+    //     creator_order.from_amount,
     //     None,
     //     BLOCK_SIZE,
     //     creator_order.token.contract_hash,
@@ -699,8 +700,8 @@ mod tests {
         // === when order is filled
         creator_order.cancelled = false;
         contract_order.cancelled = false;
-        creator_order.filled_amount = creator_order.amount;
-        contract_order.filled_amount = contract_order.amount;
+        creator_order.from_amount_filled = creator_order.from_amount;
+        contract_order.from_amount_filled = contract_order.from_amount;
         update_order(
             &mut deps.storage,
             &creator_order.creator.clone(),
@@ -727,8 +728,8 @@ mod tests {
             StdError::generic_err("Order already filled.")
         );
         // === when order can be cancelled
-        creator_order.filled_amount = Uint128(1);
-        contract_order.filled_amount = Uint128(1);
+        creator_order.from_amount_filled = Uint128(1);
+        contract_order.from_amount_filled = Uint128(1);
         update_order(
             &mut deps.storage,
             &creator_order.creator.clone(),
@@ -758,7 +759,7 @@ mod tests {
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
                 deps.api.human_address(&creator_order.creator).unwrap(),
-                (creator_order.amount - creator_order.filled_amount).unwrap(),
+                (creator_order.from_amount - creator_order.from_amount_filled).unwrap(),
                 None,
                 BLOCK_SIZE,
                 from_registered_token.contract_hash,
@@ -924,9 +925,10 @@ mod tests {
             from_token: mock_butt().address,
             to_token: mock_token().address,
             creator: deps.api.canonical_address(&mock_user_address()).unwrap(),
-            amount: Uint128(MOCK_AMOUNT),
-            filled_amount: Uint128::zero(),
-            to_amount: Uint128(MOCK_AMOUNT),
+            from_amount: Uint128(MOCK_AMOUNT),
+            from_amount_filled: Uint128::zero(),
+            net_to_amount: Uint128(MOCK_AMOUNT),
+            net_to_amount_filled: Uint128::zero(),
             block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             block_height: mock_env(MOCK_ADMIN, &[]).block.height,
             cancelled: false,
