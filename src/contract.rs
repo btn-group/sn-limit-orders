@@ -293,7 +293,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     }
     // Check the amount + filled amount is less than or equal to amount
     if creator_order.cancelled {
-        return Err(StdError::generic_err("Order has been cancelled."));
+        return Err(StdError::generic_err("Order already cancelled."));
     }
     if creator_order.amount == creator_order.filled_amount {
         return Err(StdError::generic_err("Order already filled."));
@@ -1014,11 +1014,55 @@ mod tests {
         // == when order exists
         create_order_helper(&mut deps);
         // === when to_token does not match the token sent in
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
         // === * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("To token does not match the token sent in.")
+        );
+        // === when to token matches the token sent in
+        // ==== when order is cancelled
+        let mut creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let mut contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            creator_order.other_storage_position,
+        )
+        .unwrap();
+        creator_order.cancelled = true;
+        contract_order.cancelled = true;
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        // ==== * it raises an error
+        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order already cancelled.")
         );
     }
 
