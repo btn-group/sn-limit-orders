@@ -169,7 +169,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&creator_order.creator)?,
-        Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
+        (creator_order.amount - creator_order.filled_amount)?,
         None,
         BLOCK_SIZE,
         from_token.contract_hash,
