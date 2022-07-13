@@ -286,6 +286,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         contract_order.other_storage_position,
     )?;
     // Check the token is the same at the to_token
+    if creator_order.to_token != env.message.sender {
+        return Err(StdError::generic_err(
+            "To token does not match the token sent in.",
+        ));
+    }
     // Check the amount + filled amount is less than or equal to amount
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order has been cancelled."));
@@ -996,7 +1001,11 @@ mod tests {
             msg: to_binary(&receive_msg).unwrap(),
         };
         // == when order does not exist
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
         // == * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
@@ -1004,6 +1013,13 @@ mod tests {
         );
         // == when order exists
         create_order_helper(&mut deps);
+        // === when to_token does not match the token sent in
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        // === * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("To token does not match the token sent in.")
+        );
     }
 
     #[test]
