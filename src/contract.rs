@@ -820,38 +820,39 @@ mod tests {
         assert_eq!(calculate_fee(butt_balance, amount), Uint128::zero());
         // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
         butt_balance = Uint128(99_999_999_999);
+        let denom: Uint128 = Uint128(10_000);
         // = * it returns the appropriate fee
         assert_eq!(
             calculate_fee(butt_balance, amount),
-            Uint128(amount.u128() * 6 / 10_000)
+            amount.multiply_ratio(Uint128(6), denom)
         );
         // = when user has a BUTT balance over or equal to 25_000_000_000 and under 50_000_000_000
         butt_balance = Uint128(49_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
             calculate_fee(butt_balance, amount),
-            Uint128(amount.u128() * 12 / 10_000)
+            amount.multiply_ratio(Uint128(12), denom)
         );
         // = when user has a BUTT balance over or equal to 12_500_000_000 and under 25_000_000_000
         butt_balance = Uint128(24_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
             calculate_fee(butt_balance, amount),
-            Uint128(amount.u128() * 18 / 10_000)
+            amount.multiply_ratio(Uint128(18), denom)
         );
         // = when user has a BUTT balance over or equal to 6_250_000_000 and under 12_500_000_000
         butt_balance = Uint128(12_499_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
             calculate_fee(butt_balance, amount),
-            Uint128(amount.u128() * 24 / 10_000)
+            amount.multiply_ratio(Uint128(24), denom)
         );
         // = when user has a BUTT balance under 6_250_000_000
         butt_balance = Uint128(6_249_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
             calculate_fee(butt_balance, amount),
-            Uint128(amount.u128() * 30 / 10_000)
+            amount.multiply_ratio(Uint128(30), denom)
         );
     }
 
