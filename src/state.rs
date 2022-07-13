@@ -26,24 +26,24 @@ pub struct RegisteredToken {
 }
 
 pub fn read_registered_token<S: Storage>(
-    store: &S,
+    storage: &S,
     token_address: &CanonicalAddr,
 ) -> Option<RegisteredToken> {
-    let registered_tokens_store = ReadonlyPrefixedStorage::new(PREFIX_REGISTERED_TOKENS, store);
-    let registered_tokens_store = TypedStore::attach(&registered_tokens_store);
-    registered_tokens_store
+    let registered_tokens_storage = ReadonlyPrefixedStorage::new(PREFIX_REGISTERED_TOKENS, storage);
+    let registered_tokens_storage = TypedStore::attach(&registered_tokens_storage);
+    registered_tokens_storage
         .may_load(token_address.as_slice())
         .unwrap()
 }
 
 pub fn write_registered_token<S: Storage>(
-    store: &mut S,
+    storage: &mut S,
     token_address: &CanonicalAddr,
     registered_token: RegisteredToken,
 ) -> StdResult<()> {
-    let mut registered_tokens_store = PrefixedStorage::new(PREFIX_REGISTERED_TOKENS, store);
-    let mut registered_tokens_store = TypedStoreMut::attach(&mut registered_tokens_store);
-    registered_tokens_store.store(token_address.as_slice(), &registered_token)
+    let mut registered_tokens_storage = PrefixedStorage::new(PREFIX_REGISTERED_TOKENS, storage);
+    let mut registered_tokens_storage = TypedStoreMut::attach(&mut registered_tokens_storage);
+    registered_tokens_storage.store(token_address.as_slice(), &registered_token)
 }
 
 // === Orders ===
