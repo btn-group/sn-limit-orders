@@ -716,6 +716,44 @@ mod tests {
             .unwrap()
             .sum_balance,
             Uint128(MOCK_AMOUNT)
+        );
+
+        // == * it stores the order for the creator
+        // == * it stores the order for the smart_contract
+        let order: Order = Order {
+            position: 0,
+            other_storage_position: 0,
+            from_token: mock_butt().address,
+            to_token: mock_token().address,
+            creator: deps.api.canonical_address(&mock_user_address()).unwrap(),
+            amount: Uint128(MOCK_AMOUNT),
+            filled_amount: Uint128(0),
+            to_amount: Uint128(MOCK_AMOUNT),
+            block_time: mock_env(MOCK_ADMIN, &[]).block.time,
+            block_height: mock_env(MOCK_ADMIN, &[]).block.height,
+            cancelled: false,
+            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)),
+        };
+        assert_eq!(
+            order_at_position(
+                &mut deps.storage,
+                &deps.api.canonical_address(&mock_user_address()).unwrap(),
+                0
+            )
+            .unwrap(),
+            order
+        );
+        assert_eq!(
+            order_at_position(
+                &mut deps.storage,
+                &deps
+                    .api
+                    .canonical_address(&mock_env(MOCK_ADMIN, &[]).contract.address)
+                    .unwrap(),
+                0
+            )
+            .unwrap(),
+            order
         )
     }
 
