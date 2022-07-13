@@ -107,7 +107,7 @@ fn append_order<S: Storage>(
 
 fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
     let user_butt_balance_as_u128: u128 = user_butt_balance.u128();
-    let fee_percentage = if user_butt_balance_as_u128 >= 100_000_000_000 {
+    let nom = if user_butt_balance_as_u128 >= 100_000_000_000 {
         0
     } else if user_butt_balance_as_u128 >= 50_000_000_000 {
         6
@@ -120,10 +120,10 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
     } else {
         30
     };
-    if fee_percentage > 0 {
-        Uint128(to_amount.u128() * fee_percentage / 10_000)
+    if nom > 0 {
+        to_amount.multiply_ratio(Uint128(nom), Uint128(10_000))
     } else {
-        Uint128(0)
+        Uint128::zero()
     }
 }
 
@@ -242,7 +242,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         to_token: to_token,
         creator: creator_address.clone(),
         amount: amount,
-        filled_amount: Uint128(0),
+        filled_amount: Uint128::zero(),
         to_amount: to_amount,
         block_time: env.block.time,
         block_height: env.block.height,
@@ -454,7 +454,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
             let token_details: RegisteredToken = RegisteredToken {
                 address: token.address.clone(),
                 contract_hash: token.contract_hash.clone(),
-                sum_balance: Uint128(0),
+                sum_balance: Uint128::zero(),
             };
             write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
             messages.push(snip20::register_receive_msg(
@@ -614,7 +614,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::zero(),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
@@ -648,7 +648,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(0),
+            amount: Uint128::zero(),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(
@@ -767,7 +767,7 @@ mod tests {
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
                 deps.api.human_address(&creator_order.creator).unwrap(),
-                Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
+                (creator_order.amount - creator_order.filled_amount).unwrap(),
                 None,
                 BLOCK_SIZE,
                 from_registered_token.contract_hash,
@@ -817,7 +817,7 @@ mod tests {
         // = when user has a BUTT balance over or equal to 100_000_000_000
         let mut butt_balance: Uint128 = Uint128(100_000_000_000);
         // = * it returns a zero fee
-        assert_eq!(calculate_fee(butt_balance, amount), Uint128(0));
+        assert_eq!(calculate_fee(butt_balance, amount), Uint128::zero());
         // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
         butt_balance = Uint128(99_999_999_999);
         // = * it returns the appropriate fee
@@ -906,7 +906,7 @@ mod tests {
             )
             .unwrap()
             .sum_balance,
-            Uint128(0)
+            Uint128::zero()
         );
         handle(
             &mut deps,
@@ -933,7 +933,7 @@ mod tests {
             to_token: mock_token().address,
             creator: deps.api.canonical_address(&mock_user_address()).unwrap(),
             amount: Uint128(MOCK_AMOUNT),
-            filled_amount: Uint128(0),
+            filled_amount: Uint128::zero(),
             to_amount: Uint128(MOCK_AMOUNT),
             block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             block_height: mock_env(MOCK_ADMIN, &[]).block.height,
