@@ -11,9 +11,6 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    Cancel {
-        position: u32,
-    },
     Receive {
         sender: HumanAddr,
         from: HumanAddr,
@@ -50,6 +47,9 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
+    CancelOrder {
+        position: u32,
+    },
     CreateOrder {
         butt_viewing_key: String,
         to_amount: Uint128,
