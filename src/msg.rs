@@ -55,7 +55,7 @@ pub enum ReceiveMsg {
         to_amount: Uint128,
         to_token: HumanAddr,
     },
-    Fill {
+    FillOrder {
         position: u32,
     },
 }

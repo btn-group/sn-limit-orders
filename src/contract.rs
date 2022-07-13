@@ -90,7 +90,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
             to_amount,
             to_token,
         ),
-        ReceiveMsg::Fill { position } => fill_order(deps, &env, from, amount, position),
+        ReceiveMsg::FillOrder { position } => fill_order(deps, &env, from, amount, position),
     };
     pad_response(response)
 }
@@ -271,15 +271,29 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     authorize(from, config.admin)?;
+    if amount.is_zero() {
+        return Err(StdError::generic_err("Amount must be greater than zero."));
+    }
 
-    let (mut creator_order, mut contract_order) = verify_orders_for_fill(
-        &deps.api,
+    let mut contract_order = order_at_position(
         &mut deps.storage,
         &deps.api.canonical_address(&env.contract.address)?,
-        amount,
         position,
-        env.message.sender.clone(),
     )?;
+    let mut creator_order = order_at_position(
+        &mut deps.storage,
+        &contract_order.creator,
+        contract_order.other_storage_position,
+    )?;
+    // Check the token is the same at the to_token
+    // Check the amount + filled amount is less than or equal to amount
+    if creator_order.cancelled {
+        return Err(StdError::generic_err("Order has been cancelled."));
+    }
+    if creator_order.amount == creator_order.filled_amount {
+        return Err(StdError::generic_err("Order already filled."));
+    }
+
     // Update filled amount
     // Send fee?
 
@@ -505,33 +519,6 @@ fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order
     Ok(())
 }
 
-// Verify the Order and then verify it's counter Order
-fn verify_orders_for_fill<A: Api, S: Storage>(
-    api: &A,
-    store: &mut S,
-    address: &CanonicalAddr,
-    amount: Uint128,
-    position: u32,
-    token_address: HumanAddr,
-) -> StdResult<(Order, Order)> {
-    let contract_order = order_at_position(store, address, position)?;
-    let creator_order = order_at_position(
-        store,
-        &contract_order.creator,
-        contract_order.other_storage_position,
-    )?;
-    // Check the token is the same at the to_token
-    // Check the amount + filled amount is less than or equal to amount
-    if creator_order.cancelled {
-        return Err(StdError::generic_err("Order has been cancelled."));
-    }
-    if creator_order.amount == creator_order.filled_amount {
-        return Err(StdError::generic_err("Order already filled."));
-    }
-
-    Ok((creator_order, contract_order))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,7 +660,7 @@ mod tests {
             &mut deps.storage,
             &deps
                 .api
-                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .canonical_address(&mock_contract().address)
                 .unwrap(),
             creator_order.other_storage_position,
         )
@@ -690,7 +677,7 @@ mod tests {
             &mut deps.storage,
             &deps
                 .api
-                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .canonical_address(&mock_contract().address)
                 .unwrap(),
             contract_order.clone(),
         )
@@ -720,7 +707,7 @@ mod tests {
             &mut deps.storage,
             &deps
                 .api
-                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .canonical_address(&mock_contract().address)
                 .unwrap(),
             contract_order.clone(),
         )
@@ -748,7 +735,7 @@ mod tests {
             &mut deps.storage,
             &deps
                 .api
-                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .canonical_address(&mock_contract().address)
                 .unwrap(),
             contract_order,
         )
@@ -786,7 +773,7 @@ mod tests {
             &mut deps.storage,
             &deps
                 .api
-                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .canonical_address(&mock_contract().address)
                 .unwrap(),
             creator_order.other_storage_position,
         )
@@ -955,13 +942,53 @@ mod tests {
                 &mut deps.storage,
                 &deps
                     .api
-                    .canonical_address(&mock_env(MOCK_ADMIN, &[]).contract.address)
+                    .canonical_address(&mock_contract().address)
                     .unwrap(),
                 0
             )
             .unwrap(),
             order
         )
+    }
+
+    #[test]
+    fn test_fill_order() {
+        let (_init_result, mut deps) = init_helper(true);
+
+        // when called by a non-admin
+        let receive_msg = ReceiveMsg::FillOrder { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // when called by the admin
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        // = when amount sent in is zero
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin,
+            amount: Uint128::zero(),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        // * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Amount must be greater than zero.")
+        );
     }
 
     #[test]
