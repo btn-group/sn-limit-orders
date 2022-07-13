@@ -286,6 +286,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         contract_order.other_storage_position,
     )?;
     // Check the token is the same at the to_token
+    if creator_order.to_token != env.message.sender {
+        return Err(StdError::generic_err(
+            "To token does not match the token sent in.",
+        ));
+    }
     // Check the amount + filled amount is less than or equal to amount
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order has been cancelled."));
@@ -530,6 +535,21 @@ mod tests {
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
+    fn create_order_helper<S: Storage, A: Api, Q: Querier>(deps: &mut Extern<S, A, Q>) {
+        let receive_msg = ReceiveMsg::CreateOrder {
+            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
+            to_amount: Uint128(MOCK_AMOUNT),
+            to_token: mock_token().address,
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        handle(deps, mock_env(mock_butt().address, &[]), handle_msg.clone()).unwrap();
+    }
+
     fn init_helper(
         register_tokens: bool,
     ) -> (
@@ -613,23 +633,7 @@ mod tests {
         );
 
         // = when order at position exists
-        let receive_msg = ReceiveMsg::CreateOrder {
-            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
-            to_amount: Uint128(MOCK_AMOUNT),
-            to_token: mock_token().address,
-        };
-        let handle_msg = HandleMsg::Receive {
-            sender: mock_user_address(),
-            from: mock_user_address(),
-            amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
-        };
-        handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        )
-        .unwrap();
+        create_order_helper(&mut deps);
         // == when token used to cancel doesn't match the from_token
         let receive_msg = ReceiveMsg::CancelOrder { position: 0 };
         let handle_msg = HandleMsg::Receive {
@@ -997,11 +1001,24 @@ mod tests {
             msg: to_binary(&receive_msg).unwrap(),
         };
         // == when order does not exist
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
         // == * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("AppendStorage access out of bounds")
+        );
+        // == when order exists
+        create_order_helper(&mut deps);
+        // === when to_token does not match the token sent in
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        // === * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("To token does not match the token sent in.")
         );
     }
 
