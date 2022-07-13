@@ -979,15 +979,29 @@ mod tests {
         // = when amount sent in is zero
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
-            from: config.admin,
+            from: config.admin.clone(),
             amount: Uint128::zero(),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
-        // * it raises an error
+        // = * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("Amount must be greater than zero.")
+        );
+        // = when amount sent in is positive
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin,
+            amount: Uint128(1),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // == when order does not exist
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("AppendStorage access out of bounds")
         );
     }
 
