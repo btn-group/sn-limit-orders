@@ -530,6 +530,21 @@ mod tests {
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
+    fn create_order_helper<S: Storage, A: Api, Q: Querier>(deps: &mut Extern<S, A, Q>) {
+        let receive_msg = ReceiveMsg::CreateOrder {
+            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
+            to_amount: Uint128(MOCK_AMOUNT),
+            to_token: mock_token().address,
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        handle(deps, mock_env(mock_butt().address, &[]), handle_msg.clone()).unwrap();
+    }
+
     fn init_helper(
         register_tokens: bool,
     ) -> (
@@ -613,23 +628,7 @@ mod tests {
         );
 
         // = when order at position exists
-        let receive_msg = ReceiveMsg::CreateOrder {
-            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
-            to_amount: Uint128(MOCK_AMOUNT),
-            to_token: mock_token().address,
-        };
-        let handle_msg = HandleMsg::Receive {
-            sender: mock_user_address(),
-            from: mock_user_address(),
-            amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
-        };
-        handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        )
-        .unwrap();
+        create_order_helper(&mut deps);
         // == when token used to cancel doesn't match the from_token
         let receive_msg = ReceiveMsg::CancelOrder { position: 0 };
         let handle_msg = HandleMsg::Receive {
@@ -1003,6 +1002,8 @@ mod tests {
             handle_result.unwrap_err(),
             StdError::generic_err("AppendStorage access out of bounds")
         );
+        // == when order exists
+        create_order_helper(&mut deps);
     }
 
     #[test]
