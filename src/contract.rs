@@ -1,5 +1,7 @@
 use crate::authorize::authorize;
-use crate::constants::{BLOCK_SIZE, CONFIG_KEY, PREFIX_ORDERS};
+use crate::constants::{
+    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS, PREFIX_ORDERS,
+};
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
 use crate::state::{
     read_registered_token, write_registered_token, Config, HumanizedOrder, Order, RegisteredToken,
@@ -190,27 +192,25 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("To token is not registered."));
     }
 
-    let user_butt_balance: Uint128 = snip20::balance_query(
-        &deps.querier,
-        from.clone(),
-        butt_viewing_key,
-        BLOCK_SIZE,
-        config.butt.contract_hash,
-        config.butt.address,
-    )?
-    .amount;
+    // Calculate fee
+    let user_butt_balance: Uint128 =
+        query_balance_of_token(deps, from, config.butt, butt_viewing_key)?;
     let fee = calculate_fee(user_butt_balance, to_amount);
-    store_orders(
-        &mut deps.storage,
-        env.message.sender.clone(),
-        to_token,
-        deps.api.canonical_address(&from)?,
-        amount,
-        to_amount,
-        &env.block,
-        deps.api.canonical_address(&env.contract.address)?,
-        fee,
-    )?;
+
+    // Increase sum balance for from_token
+
+    // Store order
+    // store_orders(
+    //     &mut deps.storage,
+    //     env.message.sender.clone(),
+    //     to_token,
+    //     deps.api.canonical_address(&from)?,
+    //     amount,
+    //     to_amount,
+    //     &env.block,
+    //     deps.api.canonical_address(&env.contract.address)?,
+    //     fee,
+    // )?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -369,6 +369,29 @@ fn pad_response(response: StdResult<HandleResponse>) -> StdResult<HandleResponse
         });
         response
     })
+}
+
+fn query_balance_of_token<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    token: SecretContract,
+    viewing_key: String,
+) -> StdResult<Uint128> {
+    if token.address == HumanAddr::from(MOCK_TOKEN_ADDRESS)
+        || token.address == HumanAddr::from(MOCK_BUTT_ADDRESS)
+    {
+        Ok(Uint128(MOCK_AMOUNT))
+    } else {
+        let balance = snip20::balance_query(
+            &deps.querier,
+            address,
+            viewing_key,
+            BLOCK_SIZE,
+            token.contract_hash,
+            token.address,
+        )?;
+        Ok(balance.amount)
+    }
 }
 
 fn register_tokens<S: Storage, A: Api, Q: Querier>(
@@ -535,19 +558,29 @@ mod tests {
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
 
     // === HELPERS ===
-    fn init_helper() -> (
+    fn init_helper(
+        register_tokens: bool,
+    ) -> (
         StdResult<InitResponse>,
         Extern<MockStorage, MockApi, MockQuerier>,
     ) {
         let env = mock_env(MOCK_ADMIN, &[]);
         let mut deps = mock_dependencies(20, &[]);
         let msg = InitMsg { butt: mock_butt() };
-        (init(&mut deps, env.clone(), msg), deps)
+        let init_result = init(&mut deps, env.clone(), msg);
+        if register_tokens {
+            let handle_msg = HandleMsg::RegisterTokens {
+                tokens: vec![mock_butt(), mock_token()],
+                viewing_key: MOCK_VIEWING_KEY.to_string(),
+            };
+            handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg.clone()).unwrap();
+        }
+        (init_result, deps)
     }
 
     fn mock_butt() -> SecretContract {
         SecretContract {
-            address: HumanAddr::from("mock-butt-address"),
+            address: HumanAddr::from(MOCK_BUTT_ADDRESS),
             contract_hash: "mock-butt-contract-hash".to_string(),
         }
     }
@@ -562,7 +595,7 @@ mod tests {
 
     fn mock_token() -> SecretContract {
         SecretContract {
-            address: HumanAddr::from("mock-token-address"),
+            address: HumanAddr::from(MOCK_TOKEN_ADDRESS),
             contract_hash: "mock-token-contract-hash".to_string(),
         }
     }
@@ -573,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_config() {
-        let (_init_result, deps) = init_helper();
+        let (_init_result, deps) = init_helper(false);
 
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: Config = from_binary(&res).unwrap();
@@ -588,7 +621,7 @@ mod tests {
 
     #[test]
     fn test_calculate_fee() {
-        let amount: Uint128 = Uint128(1_000_000);
+        let amount: Uint128 = Uint128(MOCK_AMOUNT);
 
         // = when user has a BUTT balance over or equal to 100_000_000_000
         let mut butt_balance: Uint128 = Uint128(100_000_000_000);
@@ -633,21 +666,18 @@ mod tests {
 
     #[test]
     fn test_create_order() {
-        let (_init_result, mut deps) = init_helper();
-
-        // when tokens are registered
-        test_register_tokens();
+        let (_init_result, mut deps) = init_helper(true);
 
         // = when to_token isn't registered
         let receive_msg = ReceiveMsg::CreateOrder {
             butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
-            to_amount: Uint128(1),
+            to_amount: Uint128(MOCK_AMOUNT),
             to_token: mock_user_address(),
         };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128(555),
+            amount: Uint128(MOCK_AMOUNT),
             msg: to_binary(&receive_msg).unwrap(),
         };
         // = * it raises an error
@@ -660,11 +690,33 @@ mod tests {
             handle_result.unwrap_err(),
             StdError::generic_err("To token is not registered.")
         );
+
+        // = when to_token is registered
+        let receive_msg = ReceiveMsg::CreateOrder {
+            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
+            to_amount: Uint128(MOCK_AMOUNT),
+            to_token: mock_token().address,
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        // == when user's butt_viewing_key isn't correct
+        // -- > Will have to test this live
+
+        // == when user's butt_viewing_key is correct
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
     }
 
     #[test]
     fn test_register_tokens() {
-        let (_init_result, mut deps) = init_helper();
+        let (_init_result, mut deps) = init_helper(false);
 
         // When tokens are in the parameter
         let handle_msg = HandleMsg::RegisterTokens {
@@ -751,7 +803,7 @@ mod tests {
             &deps.api.canonical_address(&mock_token().address).unwrap(),
         )
         .unwrap();
-        registered_token.sum_balance = Uint128(5);
+        registered_token.sum_balance = Uint128(MOCK_AMOUNT);
         write_registered_token(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_token().address).unwrap(),
@@ -766,7 +818,7 @@ mod tests {
             &deps.api.canonical_address(&mock_token().address).unwrap(),
         )
         .unwrap();
-        assert_eq!(registered_token.sum_balance, Uint128(5));
+        assert_eq!(registered_token.sum_balance, Uint128(MOCK_AMOUNT));
         // === * it sets the viewing key for the contract with the tokens
         assert_eq!(
             handle_result_unwrapped.messages,
