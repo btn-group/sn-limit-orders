@@ -134,12 +134,32 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
-    let (mut creator_order, mut contract_order) = verify_orders_for_cancel(
+    if amount.u128() > 0 {
+        return Err(StdError::generic_err("Amount sent in must be zero."));
+    };
+
+    let mut creator_order = order_at_position(
         &mut deps.storage,
-        &deps.api.canonical_address(&env.message.sender)?,
-        &deps.api.canonical_address(&env.contract.address)?,
+        &deps.api.canonical_address(&from)?,
         position,
     )?;
+    let mut contract_order = order_at_position(
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.contract.address)?,
+        creator_order.other_storage_position,
+    )?;
+    if creator_order.from_token != env.message.sender {
+        return Err(StdError::generic_err(
+            "Token used to cancel does not match the from token of order.",
+        ));
+    }
+    if creator_order.cancelled {
+        return Err(StdError::generic_err("Order already cancelled."));
+    }
+    if creator_order.amount == creator_order.filled_amount {
+        return Err(StdError::generic_err("Order already filled."));
+    }
+
     let from_token: RegisteredToken = read_registered_token(
         &deps.storage,
         &deps.api.canonical_address(&creator_order.from_token)?,
@@ -512,28 +532,6 @@ fn verify_orders_for_fill<A: Api, S: Storage>(
     Ok((creator_order, contract_order))
 }
 
-fn verify_orders_for_cancel<S: Storage>(
-    store: &mut S,
-    address: &CanonicalAddr,
-    contract_address: &CanonicalAddr,
-    position: u32,
-) -> StdResult<(Order, Order)> {
-    let creator_order = order_at_position(store, address, position)?;
-    let contract_order = order_at_position(
-        store,
-        contract_address,
-        creator_order.other_storage_position,
-    )?;
-    if creator_order.cancelled {
-        return Err(StdError::generic_err("Order already cancelled."));
-    }
-    if creator_order.amount == creator_order.filled_amount {
-        return Err(StdError::generic_err("Order has been filled."));
-    }
-
-    Ok((creator_order, contract_order))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,7 +594,205 @@ mod tests {
     fn test_cancel_order() {
         let (_init_result, mut deps) = init_helper(true);
 
-        // When order exists
+        // when amount sent in is positive
+        let receive_msg = ReceiveMsg::CancelOrder { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(1),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        // * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Amount sent in must be zero.")
+        );
+
+        // when amount sent in is zero
+        // = when order at position does not exist
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+
+        // = * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("AppendStorage access out of bounds")
+        );
+
+        // = when order at position exists
+        let receive_msg = ReceiveMsg::CreateOrder {
+            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
+            to_amount: Uint128(MOCK_AMOUNT),
+            to_token: mock_token().address,
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        // == when token used to cancel doesn't match the from_token
+        let receive_msg = ReceiveMsg::CancelOrder { position: 0 };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(0),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        // == * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Token used to cancel does not match the from token of order.")
+        );
+        // == when token used to cancel matches the from_token
+        // === when order is cancelled
+        let mut creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let mut contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .unwrap(),
+            creator_order.other_storage_position,
+        )
+        .unwrap();
+        creator_order.cancelled = true;
+        contract_order.cancelled = true;
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        // === * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order already cancelled.")
+        );
+        // === when order is filled
+        creator_order.cancelled = false;
+        contract_order.cancelled = false;
+        creator_order.filled_amount = creator_order.amount;
+        contract_order.filled_amount = contract_order.amount;
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        // === * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order already filled.")
+        );
+        // === when order can be cancelled
+        creator_order.filled_amount = Uint128(1);
+        contract_order.filled_amount = Uint128(1);
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .unwrap(),
+            contract_order,
+        )
+        .unwrap();
+        // === * it sends the unfilled from token amount back to the creator
+        let from_registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps
+                .api
+                .canonical_address(&creator_order.from_token)
+                .unwrap(),
+        )
+        .unwrap();
+        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::transfer_msg(
+                deps.api.human_address(&creator_order.creator).unwrap(),
+                Uint128(creator_order.amount.u128() - creator_order.filled_amount.u128()),
+                None,
+                BLOCK_SIZE,
+                from_registered_token.contract_hash,
+                from_registered_token.address,
+            )
+            .unwrap()]
+        );
+        // === * it sets cancelled to true
+        let creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_env(mock_butt().address, &[]).contract.address)
+                .unwrap(),
+            creator_order.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(creator_order.cancelled, true);
+        assert_eq!(contract_order.cancelled, true);
     }
 
     #[test]
