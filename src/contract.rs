@@ -194,7 +194,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
 
     // Calculate fee
     let user_butt_balance: Uint128 =
-        query_balance_of_token(deps, from, config.butt, butt_viewing_key)?;
+        query_balance_of_token(deps, from.clone(), config.butt, butt_viewing_key)?;
     let fee = calculate_fee(user_butt_balance, to_amount);
 
     // Increase sum balance for from_token
@@ -209,17 +209,29 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     )?;
 
     // Store order
-    // store_orders(
-    //     &mut deps.storage,
-    //     env.message.sender.clone(),
-    //     to_token,
-    //     deps.api.canonical_address(&from)?,
-    //     amount,
-    //     to_amount,
-    //     &env.block,
-    //     deps.api.canonical_address(&env.contract.address)?,
-    //     fee,
-    // )?;
+    let contract_address: CanonicalAddr = deps.api.canonical_address(&env.contract.address)?;
+    let creator_address: CanonicalAddr = deps.api.canonical_address(&from)?;
+    let contract_order_position = get_next_position(&mut deps.storage, &contract_address)?;
+    let creator_order_position = get_next_position(&mut deps.storage, &creator_address)?;
+    let creator_order = Order {
+        position: creator_order_position,
+        other_storage_position: contract_order_position,
+        from_token: env.message.sender.clone(),
+        to_token: to_token,
+        creator: creator_address.clone(),
+        amount: amount,
+        filled_amount: Uint128(0),
+        to_amount: to_amount,
+        block_time: env.block.time,
+        block_height: env.block.height,
+        cancelled: false,
+        fee: fee,
+    };
+    let mut contract_order = creator_order.clone();
+    contract_order.position = contract_order_position;
+    contract_order.other_storage_position = creator_order_position;
+    append_order(&mut deps.storage, &contract_order, &contract_address)?;
+    append_order(&mut deps.storage, &creator_order, &creator_address)?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -459,42 +471,6 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
     message.reserve(missing);
     message.extend(std::iter::repeat(b' ').take(missing));
     message
-}
-
-fn store_orders<S: Storage>(
-    store: &mut S,
-    from_token: HumanAddr,
-    to_token: HumanAddr,
-    creator: CanonicalAddr,
-    amount: Uint128,
-    to_amount: Uint128,
-    block: &cosmwasm_std::BlockInfo,
-    contract_address: CanonicalAddr,
-    fee: Uint128,
-) -> StdResult<()> {
-    let creator_position = get_next_position(store, &creator)?;
-    let contract_address_position = get_next_position(store, &contract_address)?;
-    let from_order = Order {
-        position: creator_position,
-        other_storage_position: contract_address_position,
-        from_token: from_token,
-        to_token: to_token,
-        creator: creator.clone(),
-        amount: amount,
-        filled_amount: Uint128(0),
-        to_amount: to_amount,
-        block_time: block.time,
-        block_height: block.height,
-        cancelled: false,
-        fee: fee,
-    };
-    append_order(store, &from_order, &creator)?;
-    let mut to_order = from_order;
-    to_order.position = contract_address_position;
-    to_order.other_storage_position = creator_position;
-    append_order(store, &to_order, &contract_address)?;
-
-    Ok(())
 }
 
 fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order) -> StdResult<()> {
