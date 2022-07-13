@@ -223,7 +223,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
     let mut from_token_details: RegisteredToken =
         read_registered_token(&deps.storage, &from_token_address_canonical).unwrap();
-    from_token_details.sum_balance = Uint128(from_token_details.sum_balance.u128() + amount.u128());
+    from_token_details.sum_balance += amount;
     write_registered_token(
         &mut deps.storage,
         &from_token_address_canonical,
