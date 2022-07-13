@@ -186,9 +186,9 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let to_token_address_canonical = deps.api.canonical_address(&to_token)?;
-    let token_details: Option<RegisteredToken> =
+    let to_token_details: Option<RegisteredToken> =
         read_registered_token(&deps.storage, &to_token_address_canonical);
-    if token_details.is_none() {
+    if to_token_details.is_none() {
         return Err(StdError::generic_err("To token is not registered."));
     }
 
@@ -198,6 +198,15 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let fee = calculate_fee(user_butt_balance, to_amount);
 
     // Increase sum balance for from_token
+    let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
+    let mut from_token_details: RegisteredToken =
+        read_registered_token(&deps.storage, &from_token_address_canonical).unwrap();
+    from_token_details.sum_balance = Uint128(from_token_details.sum_balance.u128() + amount.u128());
+    write_registered_token(
+        &mut deps.storage,
+        &from_token_address_canonical,
+        from_token_details,
+    )?;
 
     // Store order
     // store_orders(
@@ -707,11 +716,31 @@ mod tests {
         // -- > Will have to test this live
 
         // == when user's butt_viewing_key is correct
-        let handle_result = handle(
+        // == * it increases the sum_balance for the from_token
+        assert_eq!(
+            read_registered_token(
+                &deps.storage,
+                &deps.api.canonical_address(&mock_butt().address).unwrap()
+            )
+            .unwrap()
+            .sum_balance,
+            Uint128(0)
+        );
+        handle(
             &mut deps,
             mock_env(mock_butt().address, &[]),
             handle_msg.clone(),
-        );
+        )
+        .unwrap();
+        assert_eq!(
+            read_registered_token(
+                &deps.storage,
+                &deps.api.canonical_address(&mock_butt().address).unwrap()
+            )
+            .unwrap()
+            .sum_balance,
+            Uint128(MOCK_AMOUNT)
+        )
     }
 
     #[test]
