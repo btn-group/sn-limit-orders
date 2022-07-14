@@ -1138,7 +1138,8 @@ mod tests {
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
-        // ===== * it updates the orders
+        // ===== * it updates the from amount filled for both orders
+        // ===== * it updates the net to amount filled
         let creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
@@ -1154,8 +1155,22 @@ mod tests {
             creator_order.other_storage_position,
         )
         .unwrap();
-        // ===== * it sends the amount to the creator
+        assert_eq!(creator_order.from_amount_filled, creator_order.from_amount);
+        assert_eq!(
+            contract_order.from_amount_filled,
+            contract_order.from_amount
+        );
+        assert_eq!(
+            creator_order.net_to_amount_filled,
+            creator_order.net_to_amount
+        );
+        assert_eq!(
+            contract_order.net_to_amount_filled,
+            contract_order.net_to_amount
+        );
+
         // ===== * it sends the correct ratio of the from_token to the admin
+        // ===== * it sends the amount to the creator
     }
 
     #[test]
