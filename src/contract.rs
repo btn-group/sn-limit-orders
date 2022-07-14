@@ -232,7 +232,23 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     update_order(
         &mut deps.storage,
         &deps.api.canonical_address(&env.contract.address)?,
-        contract_order,
+        contract_order.clone(),
+    )?;
+
+    // Create activity record
+    let activity_record: ActivityRecord = ActivityRecord {
+        position: contract_order.position,
+        activity: 0,
+        result_from_amount_filled: None,
+        result_net_to_amount_filled: None,
+        updated_at_block_height: env.block.height,
+        updated_at_block_time: env.block.time,
+    };
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    append_activity_record(
+        &mut deps.storage,
+        &activity_record,
+        &deps.api.canonical_address(&config.admin)?,
     )?;
 
     Ok(HandleResponse {
@@ -725,6 +741,7 @@ mod tests {
     #[test]
     fn test_cancel_order() {
         let (_init_result, mut deps) = init_helper(true);
+        let env = mock_env(mock_butt().address, &[]);
 
         // when amount sent in is positive
         let receive_msg = ReceiveMsg::CancelOrder { position: 0 };
@@ -734,7 +751,7 @@ mod tests {
             amount: Uint128(1),
             msg: to_binary(&receive_msg).unwrap(),
         };
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
         // * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
@@ -749,7 +766,7 @@ mod tests {
             amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
 
         // = * it raises an error
         assert_eq!(
@@ -812,11 +829,7 @@ mod tests {
         )
         .unwrap();
         // === * it raises an error
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("Order already cancelled.")
@@ -842,11 +855,7 @@ mod tests {
         )
         .unwrap();
         // === * it raises an error
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("Order already filled.")
@@ -878,7 +887,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
@@ -909,6 +918,30 @@ mod tests {
         .unwrap();
         assert_eq!(creator_order.cancelled, true);
         assert_eq!(contract_order.cancelled, true);
+
+        // ===== * it creates an activity record
+        let (activity_records, total) = get_activity_records(
+            &deps.storage,
+            &deps
+                .api
+                .canonical_address(&HumanAddr::from(MOCK_ADMIN))
+                .unwrap(),
+            0,
+            50,
+        )
+        .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(
+            activity_records[0],
+            ActivityRecord {
+                position: contract_order.position,
+                activity: 0,
+                result_from_amount_filled: None,
+                result_net_to_amount_filled: None,
+                updated_at_block_height: env.block.height.clone(),
+                updated_at_block_time: env.block.time
+            }
+        )
     }
 
     #[test]
