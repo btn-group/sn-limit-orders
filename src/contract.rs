@@ -129,6 +129,17 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
     to_binary(&result)
 }
 
+fn append_activity_record<S: Storage>(
+    store: &mut S,
+    activity_record: &ActivityRecord,
+    for_address: &CanonicalAddr,
+) -> StdResult<()> {
+    let mut store =
+        PrefixedStorage::multilevel(&[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()], store);
+    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
+    store.push(activity_record)
+}
+
 fn append_order<S: Storage>(
     store: &mut S,
     order: &Order,
@@ -305,7 +316,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(from.clone(), config.admin)?;
+    authorize(from.clone(), config.admin.clone())?;
     if amount.is_zero() {
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
@@ -399,6 +410,21 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         &mut deps.storage,
         &deps.api.canonical_address(&from_registered_token.address)?,
         from_registered_token,
+    )?;
+
+    // Create activity record
+    let activity_record: ActivityRecord = ActivityRecord {
+        position: contract_order.position,
+        activity: 1,
+        result_from_amount_filled: Some(contract_order.from_amount_filled),
+        result_net_to_amount_filled: Some(contract_order.net_to_amount_filled),
+        updated_at_block_height: env.block.height,
+        updated_at_block_time: env.block.time,
+    };
+    append_activity_record(
+        &mut deps.storage,
+        &activity_record,
+        &deps.api.canonical_address(&config.admin)?,
     )?;
 
     Ok(HandleResponse {
@@ -1058,6 +1084,7 @@ mod tests {
     #[test]
     fn test_fill_order() {
         let (_init_result, mut deps) = init_helper(true);
+        let env = mock_env(mock_butt().address, &[]);
 
         // when called by a non-admin
         let receive_msg = ReceiveMsg::FillOrder { position: 0 };
@@ -1068,11 +1095,7 @@ mod tests {
             msg: to_binary(&receive_msg).unwrap(),
         };
         // * it raises an error
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::Unauthorized { backtrace: None }
@@ -1087,7 +1110,7 @@ mod tests {
             amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
-        let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
         // = * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
@@ -1101,11 +1124,7 @@ mod tests {
             msg: to_binary(&receive_msg).unwrap(),
         };
         // == when order does not exist
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         // == * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
@@ -1114,11 +1133,7 @@ mod tests {
         // == when order exists
         create_order_helper(&mut deps);
         // === when to_token does not match the token sent in
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_butt().address, &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         // === * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
@@ -1280,6 +1295,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(to_registered_token.sum_balance, Uint128(0));
+        // ===== * it creates an activity record
+        let (activity_records, total) = get_activity_records(
+            &deps.storage,
+            &deps
+                .api
+                .canonical_address(&HumanAddr::from(MOCK_ADMIN))
+                .unwrap(),
+            0,
+            50,
+        )
+        .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(
+            activity_records[0],
+            ActivityRecord {
+                position: contract_order.position,
+                activity: 1,
+                result_from_amount_filled: Some(creator_order.from_amount_filled),
+                result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
+                updated_at_block_height: env.block.height.clone(),
+                updated_at_block_time: env.block.time
+            }
+        )
     }
 
     #[test]
