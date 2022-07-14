@@ -271,7 +271,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(from, config.admin)?;
+    authorize(from.clone(), config.admin)?;
     if amount.is_zero() {
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
@@ -304,39 +304,66 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    // Update filled amount
-    // Send fee?
+    // Update net_to_amount_filled and from_amount_filled
+    let from_filled_amount: Uint128 = contract_order
+        .from_amount
+        .multiply_ratio(amount, contract_order.net_to_amount);
+    contract_order.from_amount_filled += from_filled_amount;
+    contract_order.net_to_amount_filled += amount;
+    creator_order.from_amount_filled += from_filled_amount;
+    creator_order.net_to_amount_filled += amount;
+    update_order(
+        &mut deps.storage,
+        &creator_order.creator,
+        creator_order.clone(),
+    )?;
+    update_order(
+        &mut deps.storage,
+        &deps.api.canonical_address(&env.contract.address)?,
+        contract_order.clone(),
+    )?;
 
-    // update_tx(
-    //     &mut deps.storage,
-    //     &creator_order.from.clone(),
-    //     creator_order.clone(),
-    // )?;
-    // update_tx(
-    //     &mut deps.storage,
-    //     &contract_order.to.clone(),
-    //     contract_order,
-    // )?;
-    // let config: Config = TypedStore::attach(&mut deps.storage)
-    //     .load(CONFIG_KEY)
-    //     .unwrap();
-    let mut messages: Vec<CosmosMsg> = vec![];
-    // messages.push(snip20::transfer_msg(
-    //     config.treasury_address,
-    //     creator_order.fee,
-    //     None,
-    //     BLOCK_SIZE,
-    //     config.sscrt.contract_hash,
-    //     config.sscrt.address,
-    // )?);
-    // messages.push(snip20::transfer_msg(
-    //     deps.api.human_address(&creator_order.to)?,
-    //     creator_order.from_amount,
-    //     None,
-    //     BLOCK_SIZE,
-    //     creator_order.token.contract_hash,
-    //     env.message.sender.clone(),
-    // )?);
+    // Send from token to admin
+    // Send to token to creator
+    let mut from_registered_token: RegisteredToken = read_registered_token(
+        &deps.storage,
+        &deps.api.canonical_address(&creator_order.from_token)?,
+    )
+    .unwrap();
+    let to_registered_token: RegisteredToken = read_registered_token(
+        &deps.storage,
+        &deps.api.canonical_address(&creator_order.to_token)?,
+    )
+    .unwrap();
+    let from_filled_amount: Uint128 = contract_order
+        .from_amount
+        .multiply_ratio(amount, contract_order.net_to_amount);
+    let messages: Vec<CosmosMsg> = vec![
+        snip20::transfer_msg(
+            from,
+            from_filled_amount,
+            None,
+            BLOCK_SIZE,
+            from_registered_token.contract_hash.clone(),
+            from_registered_token.address.clone(),
+        )?,
+        snip20::transfer_msg(
+            deps.api.human_address(&contract_order.creator)?,
+            amount,
+            None,
+            BLOCK_SIZE,
+            to_registered_token.contract_hash,
+            to_registered_token.address,
+        )?,
+    ];
+
+    // Update from_token balance
+    from_registered_token.sum_balance = (from_registered_token.sum_balance - from_filled_amount)?;
+    write_registered_token(
+        &mut deps.storage,
+        &deps.api.canonical_address(&from_registered_token.address)?,
+        from_registered_token,
+    )?;
 
     Ok(HandleResponse {
         messages,
@@ -1093,7 +1120,7 @@ mod tests {
         // ===== when amount sent in is greater than unfilled amount
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
-            from: config.admin,
+            from: config.admin.clone(),
             amount: Uint128(MOCK_AMOUNT),
             msg: to_binary(&receive_msg).unwrap(),
         };
@@ -1103,6 +1130,32 @@ mod tests {
             handle_result.unwrap_err(),
             StdError::generic_err("Amount is greater than unfilled amount.")
         );
+        // ===== when amount sent in is less than or equal to the net unfilled to amount
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin,
+            amount: Uint128(MOCK_AMOUNT - 1),
+            msg: to_binary(&receive_msg).unwrap(),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        // ===== * it updates the orders
+        let creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        let contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            creator_order.other_storage_position,
+        )
+        .unwrap();
+        // ===== * it sends the amount to the creator
+        // ===== * it sends the correct ratio of the from_token to the admin
     }
 
     #[test]
