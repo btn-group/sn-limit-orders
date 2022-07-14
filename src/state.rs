@@ -59,8 +59,8 @@ pub struct HumanizedOrder {
     pub net_to_amount_filled: Uint128,
     pub cancelled: bool,
     pub fee: Uint128,
-    pub block_time: u64,
-    pub block_height: u64,
+    pub created_at_block_time: u64,
+    pub created_at_block_height: u64,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -76,8 +76,8 @@ pub struct Order {
     pub net_to_amount_filled: Uint128,
     pub cancelled: bool,
     pub fee: Uint128,
-    pub block_time: u64,
-    pub block_height: u64,
+    pub created_at_block_time: u64,
+    pub created_at_block_height: u64,
 }
 impl Order {
     pub fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
@@ -92,8 +92,8 @@ impl Order {
             net_to_amount_filled: self.net_to_amount_filled,
             cancelled: self.cancelled,
             fee: self.fee,
-            block_time: self.block_time,
-            block_height: self.block_height,
+            created_at_block_time: self.created_at_block_time,
+            created_at_block_height: self.created_at_block_height,
         })
     }
 }
