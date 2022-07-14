@@ -245,10 +245,10 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         from_amount_filled: Uint128(0),
         net_to_amount: (to_amount - fee)?,
         net_to_amount_filled: Uint128(0),
-        block_time: env.block.time,
-        block_height: env.block.height,
         cancelled: false,
         fee: fee,
+        created_at_block_time: env.block.time,
+        created_at_block_height: env.block.height,
     };
     let mut contract_order = creator_order.clone();
     contract_order.position = contract_order_position;
@@ -962,10 +962,10 @@ mod tests {
             from_amount_filled: Uint128(0),
             net_to_amount: Uint128(MOCK_AMOUNT),
             net_to_amount_filled: Uint128(0),
-            block_time: mock_env(MOCK_ADMIN, &[]).block.time,
-            block_height: mock_env(MOCK_ADMIN, &[]).block.height,
             cancelled: false,
             fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)),
+            created_at_block_time: mock_env(MOCK_ADMIN, &[]).block.time,
+            created_at_block_height: mock_env(MOCK_ADMIN, &[]).block.height,
         };
         assert_eq!(
             order_at_position(
