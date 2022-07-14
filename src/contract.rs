@@ -123,7 +123,7 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
     if nom > 0 {
         to_amount.multiply_ratio(Uint128(nom), Uint128(10_000))
     } else {
-        Uint128::zero()
+        Uint128(0)
     }
 }
 
@@ -242,9 +242,9 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         to_token: to_token,
         creator: creator_address.clone(),
         from_amount,
-        from_amount_filled: Uint128::zero(),
+        from_amount_filled: Uint128(0),
         net_to_amount: (to_amount - fee)?,
-        net_to_amount_filled: Uint128::zero(),
+        net_to_amount_filled: Uint128(0),
         block_time: env.block.time,
         block_height: env.block.height,
         cancelled: false,
@@ -340,9 +340,6 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&creator_order.to_token)?,
     )
     .unwrap();
-    let from_filled_amount: Uint128 = contract_order
-        .from_amount
-        .multiply_ratio(amount, contract_order.net_to_amount);
     let messages: Vec<CosmosMsg> = vec![
         snip20::transfer_msg(
             from,
@@ -510,7 +507,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
             let token_details: RegisteredToken = RegisteredToken {
                 address: token.address.clone(),
                 contract_hash: token.contract_hash.clone(),
-                sum_balance: Uint128::zero(),
+                sum_balance: Uint128(0),
             };
             write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
             messages.push(snip20::register_receive_msg(
@@ -658,7 +655,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128::zero(),
+            amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
@@ -676,7 +673,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
-            amount: Uint128::zero(),
+            amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(
@@ -845,7 +842,7 @@ mod tests {
         // = when user has a BUTT balance over or equal to 100_000_000_000
         let mut butt_balance: Uint128 = Uint128(100_000_000_000);
         // = * it returns a zero fee
-        assert_eq!(calculate_fee(butt_balance, amount), Uint128::zero());
+        assert_eq!(calculate_fee(butt_balance, amount), Uint128(0));
         // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
         butt_balance = Uint128(99_999_999_999);
         let denom: Uint128 = Uint128(10_000);
@@ -935,7 +932,7 @@ mod tests {
             )
             .unwrap()
             .sum_balance,
-            Uint128::zero()
+            Uint128(0)
         );
         handle(
             &mut deps,
@@ -962,9 +959,9 @@ mod tests {
             to_token: mock_token().address,
             creator: deps.api.canonical_address(&mock_user_address()).unwrap(),
             from_amount: Uint128(MOCK_AMOUNT),
-            from_amount_filled: Uint128::zero(),
+            from_amount_filled: Uint128(0),
             net_to_amount: Uint128(MOCK_AMOUNT),
-            net_to_amount_filled: Uint128::zero(),
+            net_to_amount_filled: Uint128(0),
             block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             block_height: mock_env(MOCK_ADMIN, &[]).block.height,
             cancelled: false,
@@ -1022,7 +1019,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
             from: config.admin.clone(),
-            amount: Uint128::zero(),
+            amount: Uint128(0),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_butt().address, &[]), handle_msg);
@@ -1135,6 +1132,7 @@ mod tests {
             handle_result.unwrap_err(),
             StdError::generic_err("Amount is greater than unfilled amount.")
         );
+
         // ===== when amount sent in is less than or equal to the net unfilled to amount
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
@@ -1175,12 +1173,13 @@ mod tests {
         );
 
         // ===== * it sends the correct ratio of the from_token to the admin
+        // ===== * it sends the amount to the creator
         assert_eq!(
             handle_result.unwrap().messages,
             vec![
                 snip20::transfer_msg(
                     config.admin,
-                    Uint128(MOCK_AMOUNT - 1),
+                    Uint128(MOCK_AMOUNT),
                     None,
                     BLOCK_SIZE,
                     mock_butt().contract_hash,
@@ -1198,7 +1197,24 @@ mod tests {
                 .unwrap(),
             ]
         );
-        // ===== * it sends the amount to the creator
+
+        // ===== * it updates the from tokens sum balance
+        let from_registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps
+                .api
+                .canonical_address(&creator_order.from_token)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(from_registered_token.sum_balance, Uint128(0));
+        // ===== * it does not update the to tokens sum balance
+        let to_registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps.api.canonical_address(&creator_order.to_token).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(to_registered_token.sum_balance, Uint128(0));
     }
 
     #[test]
