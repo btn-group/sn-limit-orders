@@ -1,11 +1,12 @@
 use crate::authorize::authorize;
 use crate::constants::{
-    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS, PREFIX_ORDERS,
+    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
+    PREFIX_ACTIVITY_RECORDS, PREFIX_ORDERS,
 };
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
 use crate::state::{
-    read_registered_token, write_registered_token, Config, HumanizedOrder, Order, RegisteredToken,
-    SecretContract,
+    read_registered_token, write_registered_token, ActivityRecord, Config, HumanizedOrder, Order,
+    RegisteredToken, SecretContract,
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse,
@@ -54,6 +55,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
+        QueryMsg::ActivityRecords {
+            key,
+            page,
+            page_size,
+        } => activity_records(deps, key, page, page_size),
         QueryMsg::Config {} => {
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
@@ -93,6 +99,34 @@ fn receive<S: Storage, A: Api, Q: Querier>(
         ReceiveMsg::FillOrder { position } => fill_order(deps, &env, from, amount, position),
     };
     pad_response(response)
+}
+
+fn activity_records<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+
+    // This is here to check the admin's viewing key
+    snip20::balance_query(
+        &deps.querier,
+        config.admin.clone(),
+        key.to_string(),
+        BLOCK_SIZE,
+        config.butt.contract_hash,
+        config.butt.address,
+    )?;
+
+    let address = deps.api.canonical_address(&config.admin)?;
+    let (activity_records, total) = get_activity_records(&deps.storage, &address, page, page_size)?;
+
+    let result = QueryAnswer::ActivityRecords {
+        activity_records,
+        total: Some(total),
+    };
+    to_binary(&result)
 }
 
 fn append_order<S: Storage>(
@@ -374,13 +408,44 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn get_activity_records<S: ReadonlyStorage>(
+    storage: &S,
+    for_address: &CanonicalAddr,
+    page: u32,
+    page_size: u32,
+) -> StdResult<(Vec<ActivityRecord>, u64)> {
+    let store = ReadonlyPrefixedStorage::multilevel(
+        &[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()],
+        storage,
+    );
+
+    // Try to access the storage of activity_records for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStore::<ActivityRecord, _, _>::attach(&store);
+    let store = if let Some(result) = store {
+        result?
+    } else {
+        return Ok((vec![], 0));
+    };
+
+    // Take `page_size` activity_records starting from the latest ActivityRecord, potentially skipping `page * page_size`
+    // activity_records from the start.
+    let activity_record_iter = store
+        .iter()
+        .rev()
+        .skip((page * page_size) as _)
+        .take(page_size as _);
+
+    let activity_records: StdResult<Vec<ActivityRecord>> = activity_record_iter.collect();
+    activity_records.map(|activity_records| (activity_records, store.len() as u64))
+}
+
 fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> StdResult<u32> {
     let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
     let store = AppendStoreMut::<Order, _>::attach_or_create(&mut store)?;
     Ok(store.len())
 }
 
-// Storage functions:
 fn get_orders<A: Api, S: ReadonlyStorage>(
     api: &A,
     storage: &S,
