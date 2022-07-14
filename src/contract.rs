@@ -305,13 +305,18 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     }
 
     // Update net_to_amount_filled and from_amount_filled
-    let from_filled_amount: Uint128 = contract_order
-        .from_amount
-        .multiply_ratio(amount, contract_order.net_to_amount);
-    contract_order.from_amount_filled += from_filled_amount;
     contract_order.net_to_amount_filled += amount;
-    creator_order.from_amount_filled += from_filled_amount;
     creator_order.net_to_amount_filled += amount;
+    let from_filled_amount: Uint128 =
+        if contract_order.net_to_amount_filled == contract_order.net_to_amount {
+            (contract_order.from_amount - contract_order.from_amount_filled)?
+        } else {
+            contract_order
+                .from_amount
+                .multiply_ratio(amount, contract_order.net_to_amount)
+        };
+    contract_order.from_amount_filled += from_filled_amount;
+    creator_order.from_amount_filled += from_filled_amount;
     update_order(
         &mut deps.storage,
         &creator_order.creator,
@@ -1133,7 +1138,7 @@ mod tests {
         // ===== when amount sent in is less than or equal to the net unfilled to amount
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
-            from: config.admin,
+            from: config.admin.clone(),
             amount: Uint128(MOCK_AMOUNT - 1),
             msg: to_binary(&receive_msg).unwrap(),
         };
@@ -1170,6 +1175,29 @@ mod tests {
         );
 
         // ===== * it sends the correct ratio of the from_token to the admin
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![
+                snip20::transfer_msg(
+                    config.admin,
+                    Uint128(MOCK_AMOUNT - 1),
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    mock_user_address(),
+                    Uint128(MOCK_AMOUNT - 1),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap(),
+            ]
+        );
         // ===== * it sends the amount to the creator
     }
 
