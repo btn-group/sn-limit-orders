@@ -12,6 +12,18 @@ pub struct Config {
 }
 
 // === Registered tokens ===
+// For tracking cancelled and filled
+// activity (0 => cancelled, 1 => filled)
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
+pub struct ActivityRecord {
+    pub position: u32,
+    pub activity: u8,
+    pub result_from_amount_filled: Option<Uint128>,
+    pub result_net_to_amount_filled: Option<Uint128>,
+    pub updated_at_block_height: u64,
+    pub updated_at_block_time: u64,
+}
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
 pub struct SecretContract {
     pub address: HumanAddr,
