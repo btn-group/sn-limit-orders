@@ -58,6 +58,41 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "rescue_tokens"
+      ],
+      "properties": {
+        "rescue_tokens": {
+          "type": "object",
+          "properties": {
+            "denom": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "token_address": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

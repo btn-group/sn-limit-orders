@@ -23,6 +23,7 @@ pub enum HandleMsg {
     },
     RescueTokens {
         denom: Option<String>,
+        key: Option<String>,
         token_address: Option<HumanAddr>,
     },
 }

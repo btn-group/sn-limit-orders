@@ -9,8 +9,9 @@ use crate::state::{
     RegisteredToken, SecretContract,
 };
 use cosmwasm_std::{
-    from_binary, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse,
-    HumanAddr, InitResponse, Querier, ReadonlyStorage, StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
+    CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier, QueryRequest,
+    ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use secret_toolkit::snip20;
@@ -49,8 +50,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => register_tokens(deps, &env, tokens, viewing_key),
         HandleMsg::RescueTokens {
             denom,
+            key,
             token_address,
-        } => rescue_tokens(deps, &env, denom, token_address),
+        } => rescue_tokens(deps, &env, denom, key, token_address),
     }
 }
 
@@ -648,16 +650,57 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
 fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    denom: String,
+    denom: Option<String>,
+    key: Option<String>,
     token_address: Option<HumanAddr>,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(env.message.sender.clone(), config.admin)?;
+    authorize(env.message.sender.clone(), config.admin.clone())?;
 
-    if denom.is_some()
+    let mut messages: Vec<CosmosMsg> = vec![];
+    if denom.is_some() {
+        let balance_response: BalanceResponse =
+            deps.querier.query(&QueryRequest::Bank(BankQuery::Balance {
+                address: env.contract.address.clone(),
+                denom: denom.unwrap(),
+            }))?;
 
-    if token_
-    let mut messages = vec![];
+        let withdrawal_coins: Vec<Coin> = vec![balance_response.amount];
+        messages.push(CosmosMsg::Bank(BankMsg::Send {
+            from_address: env.contract.address.clone(),
+            to_address: config.admin.clone(),
+            amount: withdrawal_coins,
+        }));
+    }
+
+    if token_address.is_some() && key.is_some() {
+        let key: String = key.unwrap();
+        let token_address: HumanAddr = token_address.unwrap();
+        let registered_token: RegisteredToken =
+            read_registered_token(&deps.storage, &deps.api.canonical_address(&token_address)?)
+                .unwrap();
+        let balance: Uint128 = snip20::balance_query(
+            &deps.querier,
+            env.contract.address.clone(),
+            key.to_string(),
+            BLOCK_SIZE,
+            registered_token.contract_hash.clone(),
+            token_address,
+        )?
+        .amount;
+        let sum_balance: Uint128 = registered_token.sum_balance;
+        let difference: Uint128 = (balance - sum_balance)?;
+        if !difference.is_zero() {
+            messages.push(snip20::transfer_msg(
+                config.admin,
+                difference,
+                None,
+                BLOCK_SIZE,
+                registered_token.contract_hash,
+                registered_token.address,
+            )?)
+        }
+    }
 
     Ok(HandleResponse {
         messages,
