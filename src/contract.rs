@@ -670,15 +670,15 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
         let registered_token: RegisteredToken =
             read_registered_token(&deps.storage, &deps.api.canonical_address(&token_address)?)
                 .unwrap();
-        let balance: Uint128 = snip20::balance_query(
-            &deps.querier,
+        let balance: Uint128 = query_balance_of_token(
+            deps,
             env.contract.address.clone(),
+            SecretContract {
+                address: token_address,
+                contract_hash: registered_token.contract_hash.clone(),
+            },
             key.to_string(),
-            BLOCK_SIZE,
-            registered_token.contract_hash.clone(),
-            token_address,
-        )?
-        .amount;
+        )?;
         let sum_balance: Uint128 = registered_token.sum_balance;
         let difference: Uint128 = (balance - sum_balance)?;
         if !difference.is_zero() {
@@ -1546,6 +1546,72 @@ mod tests {
                 )
                 .unwrap()
             ]
+        );
+    }
+
+    #[test]
+    fn test_rescue_tokens() {
+        let (_init_result, mut deps) = init_helper(true);
+        let handle_msg = HandleMsg::RescueTokens {
+            denom: Some("uscrt".to_string()),
+            key: Some(MOCK_VIEWING_KEY.to_string()),
+            token_address: Some(mock_butt().address),
+        };
+        // = when called by a non-admin
+        // = * it raises an Unauthorized error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_user_address(), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // = when called by the admin
+        // == when only denom is specified
+        let handle_msg = HandleMsg::RescueTokens {
+            denom: Some("uscrt".to_string()),
+            key: None,
+            token_address: None,
+        };
+        // === when the contract does not have the coin in it
+        // === * it sends a transfer with the balance of the coin for the contract
+        let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg.clone());
+        let handle_result_unwrapped = handle_result.unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![CosmosMsg::Bank(BankMsg::Send {
+                from_address: mock_contract().address,
+                to_address: HumanAddr(MOCK_ADMIN.to_string()),
+                amount: vec![Coin {
+                    denom: "uscrt".to_string(),
+                    amount: Uint128(0)
+                }],
+            })]
+        );
+
+        // == when only token address and key are specified
+        let handle_msg = HandleMsg::RescueTokens {
+            denom: None,
+            key: Some(MOCK_VIEWING_KEY.to_string()),
+            token_address: Some(mock_butt().address),
+        };
+        // == * it sends the excess amount of token
+        let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg.clone());
+        let handle_result_unwrapped = handle_result.unwrap();
+        assert_eq!(
+            handle_result_unwrapped.messages,
+            vec![snip20::transfer_msg(
+                HumanAddr::from(MOCK_ADMIN),
+                Uint128(MOCK_AMOUNT),
+                None,
+                BLOCK_SIZE,
+                mock_butt().contract_hash,
+                mock_butt().address,
+            )
+            .unwrap()]
         );
     }
 }
