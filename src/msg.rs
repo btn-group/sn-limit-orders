@@ -26,6 +26,9 @@ pub enum HandleMsg {
         key: Option<String>,
         token_address: Option<HumanAddr>,
     },
+    UpdateAddressesAllowedToFill {
+        addresses_allowed_to_fill: Vec<HumanAddr>,
+    },
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
