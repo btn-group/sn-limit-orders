@@ -14,6 +14,7 @@ use cosmwasm_std::{
     ReadonlyStorage, StdError, StdResult, Storage, Uint128,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
+use primitive_types::U256;
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{AppendStore, AppendStoreMut, TypedStore, TypedStoreMut};
 
@@ -147,7 +148,7 @@ fn append_order<S: Storage>(
     store.push(order)
 }
 
-fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
+fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> StdResult<Uint128> {
     let user_butt_balance_as_u128: u128 = user_butt_balance.u128();
     let nom = if user_butt_balance_as_u128 >= 100_000_000_000 {
         0
@@ -162,11 +163,18 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
     } else {
         30
     };
-    if nom > 0 {
-        to_amount.multiply_ratio(Uint128(nom), Uint128(10_000))
-    } else {
-        Uint128(0)
+    if nom == 0 {
+        return Ok(Uint128(0));
     }
+
+    let f = U256::from(to_amount.u128()).checked_mul(U256::from(nom));
+    if f.is_none() {
+        return Err(StdError::generic_err(
+            "Overflow error while calculating fee.",
+        ));
+    }
+
+    return Ok(Uint128::from((f.unwrap() / U256::from(10_000)).as_u128()));
 }
 
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
@@ -275,7 +283,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     // Calculate fee
     let user_butt_balance: Uint128 =
         query_balance_of_token(deps, from.clone(), config.butt, butt_viewing_key)?;
-    let fee = calculate_fee(user_butt_balance, to_amount);
+    let fee = calculate_fee(user_butt_balance, to_amount)?;
 
     // Increase sum balance for from_token
     let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
@@ -369,9 +377,15 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         if contract_order.net_to_amount_filled == contract_order.net_to_amount {
             (contract_order.from_amount - contract_order.from_amount_filled)?
         } else {
-            contract_order
-                .from_amount
-                .multiply_ratio(amount, contract_order.net_to_amount)
+            let f = U256::from(contract_order.from_amount.u128())
+                .checked_mul(U256::from(amount.u128()));
+            if f.is_none() {
+                return Err(StdError::generic_err(
+                    "Overflow error while calculating from_filled_amount.",
+                ));
+            }
+
+            Uint128::from((f.unwrap() / U256::from(contract_order.net_to_amount.u128())).as_u128())
         };
     contract_order.from_amount_filled += from_filled_amount;
     creator_order.from_amount_filled += from_filled_amount;
@@ -1025,41 +1039,41 @@ mod tests {
         // = when user has a BUTT balance over or equal to 100_000_000_000
         let mut butt_balance: Uint128 = Uint128(100_000_000_000);
         // = * it returns a zero fee
-        assert_eq!(calculate_fee(butt_balance, amount), Uint128(0));
+        assert_eq!(calculate_fee(butt_balance, amount).unwrap(), Uint128(0));
         // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
         butt_balance = Uint128(99_999_999_999);
         let denom: Uint128 = Uint128(10_000);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount),
+            calculate_fee(butt_balance, amount).unwrap(),
             amount.multiply_ratio(Uint128(6), denom)
         );
         // = when user has a BUTT balance over or equal to 25_000_000_000 and under 50_000_000_000
         butt_balance = Uint128(49_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount),
+            calculate_fee(butt_balance, amount).unwrap(),
             amount.multiply_ratio(Uint128(12), denom)
         );
         // = when user has a BUTT balance over or equal to 12_500_000_000 and under 25_000_000_000
         butt_balance = Uint128(24_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount),
+            calculate_fee(butt_balance, amount).unwrap(),
             amount.multiply_ratio(Uint128(18), denom)
         );
         // = when user has a BUTT balance over or equal to 6_250_000_000 and under 12_500_000_000
         butt_balance = Uint128(12_499_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount),
+            calculate_fee(butt_balance, amount).unwrap(),
             amount.multiply_ratio(Uint128(24), denom)
         );
         // = when user has a BUTT balance under 6_250_000_000
         butt_balance = Uint128(6_249_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount),
+            calculate_fee(butt_balance, amount).unwrap(),
             amount.multiply_ratio(Uint128(30), denom)
         );
     }
@@ -1146,7 +1160,7 @@ mod tests {
             net_to_amount: Uint128(MOCK_AMOUNT),
             net_to_amount_filled: Uint128(0),
             cancelled: false,
-            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)),
+            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)).unwrap(),
             created_at_block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             created_at_block_height: mock_env(MOCK_ADMIN, &[]).block.height,
         };
