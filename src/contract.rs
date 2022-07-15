@@ -25,6 +25,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
+        addresses_allowed_to_fill: vec![env.message.sender.clone()],
         admin: env.message.sender,
         butt: msg.butt,
     };
@@ -337,7 +338,9 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(from.clone(), config.admin.clone())?;
+    if !config.addresses_allowed_to_fill.contains(&from) {
+        return Err(StdError::Unauthorized { backtrace: None });
+    }
     if amount.is_zero() {
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
@@ -1025,6 +1028,7 @@ mod tests {
         let value: Config = from_binary(&res).unwrap();
         assert_eq!(
             Config {
+                addresses_allowed_to_fill: vec![HumanAddr::from(MOCK_ADMIN)],
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
             },
