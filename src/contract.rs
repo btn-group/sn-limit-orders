@@ -108,20 +108,11 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
     page_size: u32,
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-
     // This is here to check the admin's viewing key
-    snip20::balance_query(
-        &deps.querier,
-        config.admin.clone(),
-        key.to_string(),
-        BLOCK_SIZE,
-        config.butt.contract_hash,
-        config.butt.address,
-    )?;
+    query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
 
     let address = deps.api.canonical_address(&config.admin)?;
     let (activity_records, total) = get_activity_records(&deps.storage, &address, page, page_size)?;
-
     let result = QueryAnswer::ActivityRecords {
         activity_records,
         total: Some(total),
@@ -1329,28 +1320,36 @@ mod tests {
         .unwrap();
         assert_eq!(to_registered_token.sum_balance, Uint128(0));
         // ===== * it creates an activity record
-        let (activity_records, total) = get_activity_records(
-            &deps.storage,
-            &deps
-                .api
-                .canonical_address(&HumanAddr::from(MOCK_ADMIN))
-                .unwrap(),
-            0,
-            50,
+        let res = query(
+            &deps,
+            QueryMsg::ActivityRecords {
+                key: MOCK_VIEWING_KEY.to_string(),
+                page: 0,
+                page_size: 50,
+            },
         )
         .unwrap();
-        assert_eq!(total, 1);
-        assert_eq!(
-            activity_records[0],
-            ActivityRecord {
-                position: contract_order.position,
-                activity: 1,
-                result_from_amount_filled: Some(creator_order.from_amount_filled),
-                result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
-                updated_at_block_height: env.block.height.clone(),
-                updated_at_block_time: env.block.time
+        let query_answer: QueryAnswer = from_binary(&res).unwrap();
+        match query_answer {
+            QueryAnswer::ActivityRecords {
+                activity_records,
+                total,
+            } => {
+                assert_eq!(total, Some(1));
+                assert_eq!(
+                    activity_records[0],
+                    ActivityRecord {
+                        position: contract_order.position,
+                        activity: 1,
+                        result_from_amount_filled: Some(creator_order.from_amount_filled),
+                        result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
+                        updated_at_block_height: env.block.height.clone(),
+                        updated_at_block_time: env.block.time
+                    }
+                )
             }
-        )
+            _ => panic!("unexpected"),
+        }
     }
 
     #[test]
