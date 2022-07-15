@@ -1288,8 +1288,6 @@ mod tests {
         // ==== when order is not cancelled
         creator_order.cancelled = false;
         contract_order.cancelled = false;
-        creator_order.net_to_amount_filled = Uint128(1);
-        contract_order.net_to_amount_filled = Uint128(1);
         update_order(
             &mut deps.storage,
             &creator_order.creator.clone(),
@@ -1309,7 +1307,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
             from: config.admin.clone(),
-            amount: Uint128(MOCK_AMOUNT),
+            amount: Uint128(MOCK_AMOUNT + 1),
             msg: to_binary(&receive_msg).unwrap(),
         };
         // ===== * it raises an error
@@ -1323,7 +1321,7 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
             from: config.admin.clone(),
-            amount: Uint128(MOCK_AMOUNT - 1),
+            amount: Uint128(MOCK_AMOUNT),
             msg: to_binary(&receive_msg).unwrap(),
         };
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
@@ -1374,7 +1372,7 @@ mod tests {
                 .unwrap(),
                 snip20::transfer_msg(
                     mock_user_address(),
-                    Uint128(MOCK_AMOUNT - 1),
+                    Uint128(MOCK_AMOUNT),
                     None,
                     BLOCK_SIZE,
                     mock_token().contract_hash,
