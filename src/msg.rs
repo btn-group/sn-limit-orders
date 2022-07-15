@@ -21,6 +21,10 @@ pub enum HandleMsg {
         tokens: Vec<SecretContract>,
         viewing_key: String,
     },
+    RescueTokens {
+        denom: Option<String>,
+        token_address: Option<HumanAddr>,
+    },
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]

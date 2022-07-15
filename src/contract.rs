@@ -47,6 +47,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             tokens,
             viewing_key,
         } => register_tokens(deps, &env, tokens, viewing_key),
+        HandleMsg::RescueTokens {
+            denom,
+            token_address,
+        } => rescue_tokens(deps, &env, denom, token_address),
     }
 }
 
@@ -633,6 +637,27 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
             token.address,
         )?);
     }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![],
+        data: None,
+    })
+}
+
+fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    denom: String,
+    token_address: Option<HumanAddr>,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    authorize(env.message.sender.clone(), config.admin)?;
+
+    if denom.is_some()
+
+    if token_
+    let mut messages = vec![];
 
     Ok(HandleResponse {
         messages,
