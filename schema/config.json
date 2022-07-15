@@ -3,10 +3,17 @@
   "title": "Config",
   "type": "object",
   "required": [
+    "addresses_allowed_to_fill",
     "admin",
     "butt"
   ],
   "properties": {
+    "addresses_allowed_to_fill": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/HumanAddr"
+      }
+    },
     "admin": {
       "$ref": "#/definitions/HumanAddr"
     },

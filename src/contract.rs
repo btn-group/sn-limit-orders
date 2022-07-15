@@ -55,6 +55,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             key,
             token_address,
         } => rescue_tokens(deps, &env, denom, key, token_address),
+        HandleMsg::UpdateAddressesAllowedToFill {
+            addresses_allowed_to_fill,
+        } => update_addresses_allowed_to_fill(deps, &env, addresses_allowed_to_fill),
     }
 }
 
@@ -729,6 +732,25 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
     message.reserve(missing);
     message.extend(std::iter::repeat(b' ').take(missing));
     message
+}
+
+fn update_addresses_allowed_to_fill<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    addresses_allowed_to_fill: Vec<HumanAddr>,
+) -> StdResult<HandleResponse> {
+    let mut config_store = TypedStoreMut::attach(&mut deps.storage);
+    let mut config: Config = config_store.load(CONFIG_KEY).unwrap();
+    authorize(env.message.sender.clone(), config.admin.clone())?;
+
+    config.addresses_allowed_to_fill = addresses_allowed_to_fill;
+    config_store.store(CONFIG_KEY, &config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order) -> StdResult<()> {
@@ -1629,5 +1651,41 @@ mod tests {
             )
             .unwrap()]
         );
+    }
+
+    #[test]
+    fn test_update_addresses_allowed_to_fill() {
+        let (_init_result, mut deps) = init_helper(false);
+        let new_addresses_allowed_to_fill = vec![mock_user_address()];
+        let handle_msg = HandleMsg::UpdateAddressesAllowedToFill {
+            addresses_allowed_to_fill: new_addresses_allowed_to_fill.clone(),
+        };
+        // = when called by a non-admin
+        // = * it raises an Unauthorized error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_user_address(), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+
+        // = when called by the admin
+        // = * it updates the addresses_allowed_to_fill
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(config.addresses_allowed_to_fill, vec![config.admin]);
+        handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg,
+        )
+        .unwrap();
+        let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        assert_eq!(
+            config.addresses_allowed_to_fill,
+            new_addresses_allowed_to_fill
+        )
     }
 }

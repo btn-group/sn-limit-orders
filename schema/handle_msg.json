@@ -93,6 +93,28 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "update_addresses_allowed_to_fill"
+      ],
+      "properties": {
+        "update_addresses_allowed_to_fill": {
+          "type": "object",
+          "required": [
+            "addresses_allowed_to_fill"
+          ],
+          "properties": {
+            "addresses_allowed_to_fill": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
