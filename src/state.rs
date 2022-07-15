@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub admin: HumanAddr,
     pub butt: SecretContract,
+    pub addresses_allowed_to_fill: Vec<HumanAddr>,
 }
 
 // === Registered tokens ===
