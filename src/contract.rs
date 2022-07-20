@@ -764,6 +764,20 @@ fn update_addresses_allowed_to_fill<S: Storage, A: Api, Q: Querier>(
     authorize(env.message.sender.clone(), config.admin.clone())?;
 
     config.addresses_allowed_to_fill = addresses_allowed_to_fill;
+    if !config
+        .addresses_allowed_to_fill
+        .contains(&env.contract.address)
+    {
+        config
+            .addresses_allowed_to_fill
+            .push(env.contract.address.clone())
+    }
+    if !config
+        .addresses_allowed_to_fill
+        .contains(&config.admin.clone())
+    {
+        config.addresses_allowed_to_fill.push(config.admin.clone())
+    }
     config_store.store(CONFIG_KEY, &config)?;
 
     Ok(HandleResponse {
@@ -1694,7 +1708,7 @@ mod tests {
         );
 
         // = when called by the admin
-        // = * it updates the addresses_allowed_to_fill
+        // = * it updates the addresses_allowed_to_fill and adds admin and contract address
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(
             config.addresses_allowed_to_fill,
@@ -1707,9 +1721,12 @@ mod tests {
         )
         .unwrap();
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+        let mut adjusted_addresses_allowed_to_fill = new_addresses_allowed_to_fill;
+        adjusted_addresses_allowed_to_fill.push(mock_contract().address);
+        adjusted_addresses_allowed_to_fill.push(HumanAddr(MOCK_ADMIN.to_string()));
         assert_eq!(
             config.addresses_allowed_to_fill,
-            new_addresses_allowed_to_fill
+            adjusted_addresses_allowed_to_fill
         )
     }
 }
