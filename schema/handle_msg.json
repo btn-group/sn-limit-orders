@@ -13,7 +13,6 @@
           "required": [
             "amount",
             "from",
-            "msg",
             "sender"
           ],
           "properties": {
@@ -24,7 +23,14 @@
               "$ref": "#/definitions/HumanAddr"
             },
             "msg": {
-              "$ref": "#/definitions/Binary"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Binary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "sender": {
               "$ref": "#/definitions/HumanAddr"
