@@ -419,9 +419,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     )
     .unwrap();
     let messages: Vec<CosmosMsg> = vec![
-        snip20::transfer_msg(
+        snip20::send_msg(
             from,
             from_filled_amount,
+            None,
             None,
             BLOCK_SIZE,
             from_registered_token.contract_hash.clone(),
@@ -1387,9 +1388,10 @@ mod tests {
         assert_eq!(
             handle_result.unwrap().messages,
             vec![
-                snip20::transfer_msg(
+                snip20::send_msg(
                     config.admin,
                     Uint128(MOCK_AMOUNT),
+                    None,
                     None,
                     BLOCK_SIZE,
                     mock_butt().contract_hash,
