@@ -25,7 +25,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let config: Config = Config {
-        addresses_allowed_to_fill: vec![env.message.sender.clone()],
+        addresses_allowed_to_fill: vec![env.message.sender.clone(), env.contract.address],
         admin: env.message.sender,
         butt: msg.butt,
     };
@@ -1070,7 +1070,10 @@ mod tests {
         let value: Config = from_binary(&res).unwrap();
         assert_eq!(
             Config {
-                addresses_allowed_to_fill: vec![HumanAddr::from(MOCK_ADMIN)],
+                addresses_allowed_to_fill: vec![
+                    HumanAddr::from(MOCK_ADMIN),
+                    mock_contract().address
+                ],
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
             },
@@ -1253,12 +1256,12 @@ mod tests {
             StdError::Unauthorized { backtrace: None }
         );
 
-        // when called by the admin
+        // when called by an address that's allowed
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         // = when amount sent in is zero
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
-            from: config.admin.clone(),
+            from: env.contract.address.clone(),
             amount: Uint128(0),
             msg: Some(to_binary(&receive_msg).unwrap()),
         };
@@ -1681,13 +1684,10 @@ mod tests {
         let handle_msg = HandleMsg::UpdateAddressesAllowedToFill {
             addresses_allowed_to_fill: new_addresses_allowed_to_fill.clone(),
         };
+        let env = mock_env(mock_user_address(), &[]);
         // = when called by a non-admin
         // = * it raises an Unauthorized error
-        let handle_result = handle(
-            &mut deps,
-            mock_env(mock_user_address(), &[]),
-            handle_msg.clone(),
-        );
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::Unauthorized { backtrace: None }
@@ -1696,7 +1696,10 @@ mod tests {
         // = when called by the admin
         // = * it updates the addresses_allowed_to_fill
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-        assert_eq!(config.addresses_allowed_to_fill, vec![config.admin]);
+        assert_eq!(
+            config.addresses_allowed_to_fill,
+            vec![config.admin, env.contract.address]
+        );
         handle(
             &mut deps,
             mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
