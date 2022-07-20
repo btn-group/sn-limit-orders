@@ -89,25 +89,31 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     env: Env,
     from: HumanAddr,
     amount: Uint128,
-    msg: Binary,
+    msg: Option<Binary>,
 ) -> StdResult<HandleResponse> {
-    let msg: ReceiveMsg = from_binary(&msg)?;
-    let response = match msg {
-        ReceiveMsg::CancelOrder { position } => cancel_order(deps, &env, from, amount, position),
-        ReceiveMsg::CreateOrder {
-            butt_viewing_key,
-            to_amount,
-            to_token,
-        } => create_order(
-            deps,
-            &env,
-            from,
-            amount,
-            butt_viewing_key,
-            to_amount,
-            to_token,
-        ),
-        ReceiveMsg::FillOrder { position } => fill_order(deps, &env, from, amount, position),
+    let response = if msg.is_some() {
+        let msg: ReceiveMsg = from_binary(&msg.unwrap())?;
+        match msg {
+            ReceiveMsg::CancelOrder { position } => {
+                cancel_order(deps, &env, from, amount, position)
+            }
+            ReceiveMsg::CreateOrder {
+                butt_viewing_key,
+                to_amount,
+                to_token,
+            } => create_order(
+                deps,
+                &env,
+                from,
+                amount,
+                butt_viewing_key,
+                to_amount,
+                to_token,
+            ),
+            ReceiveMsg::FillOrder { position } => fill_order(deps, &env, from, amount, position),
+        }
+    } else {
+        handle_hop(deps, &env, from, amount)
     };
     pad_response(response)
 }
@@ -540,6 +546,19 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     orders.map(|orders| (orders, store.len() as u64))
 }
 
+fn handle_hop<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    mut amount: Uint128,
+) -> StdResult<HandleResponse> {
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
+}
+
 fn order_at_position<S: Storage>(
     store: &mut S,
     address: &CanonicalAddr,
@@ -785,7 +804,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         handle(deps, mock_env(mock_butt().address, &[]), handle_msg.clone()).unwrap();
     }
@@ -848,7 +867,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(1),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         // * it raises an error
@@ -863,7 +882,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(0),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
 
@@ -881,7 +900,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(0),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(
             &mut deps,
@@ -1119,7 +1138,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // = * it raises an error
         let handle_result = handle(
@@ -1142,7 +1161,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // == when user's butt_viewing_key isn't correct
         // -- > Will have to test this live
@@ -1225,7 +1244,7 @@ mod tests {
             sender: mock_user_address(),
             from: mock_user_address(),
             amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // * it raises an error
         let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
@@ -1241,7 +1260,7 @@ mod tests {
             sender: config.admin.clone(),
             from: config.admin.clone(),
             amount: Uint128(0),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         // = * it raises an error
@@ -1254,7 +1273,7 @@ mod tests {
             sender: config.admin.clone(),
             from: config.admin.clone(),
             amount: Uint128(1),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // == when order does not exist
         let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
@@ -1335,7 +1354,7 @@ mod tests {
             sender: config.admin.clone(),
             from: config.admin.clone(),
             amount: Uint128(MOCK_AMOUNT + 1),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // ===== * it raises an error
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
@@ -1349,7 +1368,7 @@ mod tests {
             sender: config.admin.clone(),
             from: config.admin.clone(),
             amount: Uint128(MOCK_AMOUNT),
-            msg: to_binary(&receive_msg).unwrap(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
         // ===== * it updates the from amount filled for both orders
