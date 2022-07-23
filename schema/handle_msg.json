@@ -5,6 +5,43 @@
     {
       "type": "object",
       "required": [
+        "finalize_route"
+      ],
+      "properties": {
+        "finalize_route": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "handle_first_hop"
+      ],
+      "properties": {
+        "handle_first_hop": {
+          "type": "object",
+          "required": [
+            "borrow_amount",
+            "hops"
+          ],
+          "properties": {
+            "borrow_amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "hops": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Hop"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "receive"
       ],
       "properties": {
@@ -127,6 +164,29 @@
     "Binary": {
       "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
       "type": "string"
+    },
+    "Hop": {
+      "type": "object",
+      "required": [
+        "from_token",
+        "trade_smart_contract"
+      ],
+      "properties": {
+        "from_token": {
+          "$ref": "#/definitions/SecretContract"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "trade_smart_contract": {
+          "$ref": "#/definitions/SecretContract"
+        }
+      }
     },
     "HumanAddr": {
       "type": "string"

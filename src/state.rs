@@ -1,18 +1,11 @@
-use crate::constants::PREFIX_REGISTERED_TOKENS;
+use crate::constants::{PREFIX_REGISTERED_TOKENS, ROUTE_STATE_KEY};
 use cosmwasm_std::{Api, CanonicalAddr, HumanAddr, StdResult, Storage, Uint128};
-use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
+use cosmwasm_storage::{singleton, singleton_read, PrefixedStorage, ReadonlyPrefixedStorage};
 use schemars::JsonSchema;
 use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Config {
-    pub admin: HumanAddr,
-    pub butt: SecretContract,
-    pub addresses_allowed_to_fill: Vec<HumanAddr>,
-}
-
-// === Registered tokens ===
 // For tracking cancelled and filled
 // activity (0 => cancelled, 1 => filled)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
@@ -25,12 +18,20 @@ pub struct ActivityRecord {
     pub updated_at_block_time: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Config {
+    pub admin: HumanAddr,
+    pub butt: SecretContract,
+    pub addresses_allowed_to_fill: Vec<HumanAddr>,
+}
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
 pub struct SecretContract {
     pub address: HumanAddr,
     pub contract_hash: String,
 }
 
+// === Registered tokens ===
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
 pub struct RegisteredToken {
     pub address: HumanAddr,
@@ -109,4 +110,38 @@ impl Order {
             created_at_block_height: self.created_at_block_height,
         })
     }
+}
+
+// === ROUTE ===
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Hop {
+    pub from_token: SecretContract,
+    pub trade_smart_contract: SecretContract,
+    pub position: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Route {
+    pub hops: VecDeque<Hop>,
+    pub borrow_amount: Uint128,
+    pub borrow_token: SecretContract,
+    pub to: HumanAddr,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
+pub struct RouteState {
+    pub current_hop: Option<Hop>,
+    pub remaining_route: Route,
+}
+
+pub fn store_route_state<S: Storage>(storage: &mut S, data: &RouteState) -> StdResult<()> {
+    singleton(storage, ROUTE_STATE_KEY).save(data)
+}
+
+pub fn read_route_state<S: Storage>(storage: &S) -> StdResult<Option<RouteState>> {
+    singleton_read(storage, ROUTE_STATE_KEY).may_load()
+}
+
+pub fn delete_route_state<S: Storage>(storage: &mut S) {
+    singleton::<S, Option<RouteState>>(storage, ROUTE_STATE_KEY).remove();
 }
