@@ -3,20 +3,22 @@ use crate::constants::{
     BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
     PREFIX_ACTIVITY_RECORDS, PREFIX_ORDERS,
 };
-use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg};
+use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg, Snip20Swap};
 use crate::state::{
-    read_registered_token, write_registered_token, ActivityRecord, Config, HumanizedOrder, Order,
-    RegisteredToken, SecretContract,
+    delete_route_state, read_registered_token, read_route_state, store_route_state,
+    write_registered_token, ActivityRecord, Config, Hop, HumanizedOrder, Order, RegisteredToken,
+    Route, RouteState, SecretContract,
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
     CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier, QueryRequest,
-    ReadonlyStorage, StdError, StdResult, Storage, Uint128,
+    ReadonlyStorage, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use primitive_types::U256;
 use secret_toolkit::snip20;
 use secret_toolkit::storage::{AppendStore, AppendStoreMut, TypedStore, TypedStoreMut};
+use std::collections::VecDeque;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -43,6 +45,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::HandleFirstHop {
+            borrow_amount,
+            hops,
+        } => handle_first_hop(deps, &env, borrow_amount, hops),
+        HandleMsg::FinalizeRoute {} => finalize_route(deps, &env),
         HandleMsg::Receive {
             from, amount, msg, ..
         } => receive(deps, env, from, amount, msg),
@@ -474,6 +481,31 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+fn finalize_route<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+) -> StdResult<HandleResponse> {
+    match read_route_state(&deps.storage)? {
+        Some(RouteState {
+            remaining_route, ..
+        }) => {
+            // this function is called only by the route creation function
+            // it is intended to always make sure that the route was completed successfully
+            // otherwise we revert the transaction
+            authorize(env.contract.address.clone(), env.message.sender.clone())?;
+            if remaining_route.hops.len() != 0 {
+                return Err(StdError::generic_err(format!(
+                    "cannot finalize: route still contains hops: {:?}",
+                    remaining_route
+                )));
+            }
+            delete_route_state(&mut deps.storage);
+            Ok(HandleResponse::default())
+        }
+        None => Err(StdError::generic_err("no route to finalize")),
+    }
+}
+
 fn get_activity_records<S: ReadonlyStorage>(
     storage: &S,
     for_address: &CanonicalAddr,
@@ -546,17 +578,186 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     orders.map(|orders| (orders, store.len() as u64))
 }
 
-fn handle_hop<S: Storage, A: Api, Q: Querier>(
+fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    from: HumanAddr,
-    mut amount: Uint128,
+    borrow_amount: Uint128,
+    mut hops: VecDeque<Hop>,
 ) -> StdResult<HandleResponse> {
+    // This is the first msg from the user, with the entire route details
+    // 1. save the remaining route to state (e.g. if the route is X/Y -> Y/Z -> Z->W then save Y/Z -> Z/W to state)
+    // 2. send `amount` X to pair X/Y
+    // 3. call FinalizeRoute to make sure everything went ok, otherwise revert the tx
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    if !config
+        .addresses_allowed_to_fill
+        .contains(&env.message.sender)
+    {
+        return Err(StdError::Unauthorized { backtrace: None });
+    }
+    if hops.len() < 2 {
+        return Err(StdError::generic_err("Route must be at least 2 hops."));
+    }
+
+    // unwrap is cool because `hops.len() >= 2`
+    let first_hop: Hop = hops.pop_front().unwrap();
+    let route: Route = Route {
+        hops,
+        borrow_amount,
+        borrow_token: first_hop.from_token.clone(),
+        to: env.message.sender.clone(),
+    };
+    store_route_state(
+        &mut deps.storage,
+        &RouteState {
+            current_hop: Some(first_hop.clone()),
+            remaining_route: route,
+        },
+    )?;
+    let send_msg_msg: Binary = if first_hop.position.is_some() {
+        to_binary(&ReceiveMsg::FillOrder {
+            position: first_hop.position.unwrap(),
+        })?
+    } else {
+        to_binary(&Snip20Swap::Swap {
+            // set expected_return to None because we don't care about slippage mid-route
+            expected_return: None,
+            // set the recepient of the swap to be this contract (the router)
+            to: Some(env.contract.address.clone()),
+        })?
+    };
+    let mut msgs = vec![snip20::send_msg(
+        first_hop.trade_smart_contract.address,
+        borrow_amount,
+        Some(send_msg_msg),
+        None,
+        BLOCK_SIZE,
+        first_hop.from_token.contract_hash,
+        first_hop.from_token.address,
+    )?];
+
+    msgs.push(
+        // finalize the route at the end, to make sure the route was completed successfully
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: env.contract.address.clone(),
+            callback_code_hash: env.contract_code_hash.clone(),
+            msg: to_binary(&HandleMsg::FinalizeRoute {})?,
+            send: vec![],
+        }),
+    );
+
     Ok(HandleResponse {
-        messages: vec![],
+        messages: msgs,
         log: vec![],
         data: None,
     })
+}
+
+fn handle_hop<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    _from: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    // This is a receive msg somewhere along the route
+    // 1. load route from state (Y/Z -> Z/W)
+    // 2. save the remaining route to state (Z/W)
+    // 3. send `amount` Y to pair Y/Z
+
+    // 1'. load route from state (Z/W)
+    // 2'. this is the last hop so delete the entire route state
+    // 3'. send `amount` Z to pair Z/W with recepient `to`
+    match read_route_state(&deps.storage)? {
+        Some(RouteState {
+            current_hop,
+            remaining_route:
+                Route {
+                    mut hops,
+                    borrow_amount,
+                    borrow_token,
+                    to,
+                },
+        }) => {
+            let next_hop: Hop = match hops.pop_front() {
+                Some(next_hop) => next_hop,
+                None => return Err(StdError::generic_err("Route must be at least 1 hop.")),
+            };
+            if env.message.sender != next_hop.from_token.address || current_hop.is_none() {
+                return Err(StdError::generic_err(
+                    "Route can only be called by receiving the token of the next hop from the previous pair.",
+                ));
+            }
+
+            let mut msgs = vec![];
+            let current_hop = Some(next_hop.clone());
+            if hops.len() == 0 {
+                // last hop
+                // 1. set is_done to true for FinalizeRoute
+                // 2. set expected_return for the final swap
+                // 3. set the recipient of the final swap to be the user
+                if amount.lt(&borrow_amount) {
+                    return Err(StdError::generic_err(
+                        "Operation fell short of minimum_acceptable_amount",
+                    ));
+                }
+                // Send fee to appropriate person
+                if amount.gt(&borrow_amount) {
+                    msgs.push(snip20::transfer_msg(
+                        to.clone(),
+                        (amount - borrow_amount).unwrap(),
+                        None,
+                        BLOCK_SIZE,
+                        borrow_token.contract_hash.clone(),
+                        borrow_token.address.clone(),
+                    )?);
+                }
+            } else {
+                // not last hop
+                // 1. set expected_return to None because we don't care about slippage mid-route
+                // 2. set the recipient of the swap to be this contract (the router)
+                let send_msg_msg: Binary = if next_hop.position.is_some() {
+                    to_binary(&ReceiveMsg::FillOrder {
+                        position: next_hop.position.unwrap(),
+                    })?
+                } else {
+                    to_binary(&Snip20Swap::Swap {
+                        // set expected_return to None because we don't care about slippage mid-route
+                        expected_return: None,
+                        // set the recepient of the swap to be this contract (the router)
+                        to: Some(env.contract.address.clone()),
+                    })?
+                };
+                msgs.push(snip20::send_msg(
+                    next_hop.trade_smart_contract.address,
+                    amount,
+                    Some(send_msg_msg),
+                    None,
+                    BLOCK_SIZE,
+                    next_hop.from_token.contract_hash,
+                    next_hop.from_token.address,
+                )?);
+            }
+            store_route_state(
+                &mut deps.storage,
+                &RouteState {
+                    current_hop,
+                    remaining_route: Route {
+                        hops, // hops was mutated earlier when we did `hops.pop_front()`
+                        borrow_amount,
+                        borrow_token,
+                        to,
+                    },
+                },
+            )?;
+
+            Ok(HandleResponse {
+                messages: msgs,
+                log: vec![],
+                data: None,
+            })
+        }
+        None => Err(StdError::generic_err("cannot find route")),
+    }
 }
 
 fn order_at_position<S: Storage>(

@@ -1,7 +1,8 @@
-use crate::state::{ActivityRecord, HumanizedOrder, SecretContract};
+use crate::state::{ActivityRecord, Hop, HumanizedOrder, SecretContract};
 use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
@@ -11,6 +12,11 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
+    FinalizeRoute {},
+    HandleFirstHop {
+        borrow_amount: Uint128,
+        hops: VecDeque<Hop>,
+    },
     Receive {
         sender: HumanAddr,
         from: HumanAddr,
@@ -74,5 +80,14 @@ pub enum ReceiveMsg {
     },
     FillOrder {
         position: u32,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Snip20Swap {
+    Swap {
+        expected_return: Option<Uint128>,
+        to: Option<HumanAddr>,
     },
 }
