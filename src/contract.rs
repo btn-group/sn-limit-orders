@@ -614,22 +614,10 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
             remaining_route: route,
         },
     )?;
-    let send_msg_msg: Binary = if first_hop.position.is_some() {
-        to_binary(&ReceiveMsg::FillOrder {
-            position: first_hop.position.unwrap(),
-        })?
-    } else {
-        to_binary(&Snip20Swap::Swap {
-            // set expected_return to None because we don't care about slippage mid-route
-            expected_return: None,
-            // set the recepient of the swap to be this contract (the router)
-            to: Some(env.contract.address.clone()),
-        })?
-    };
     let mut msgs = vec![snip20::send_msg(
-        first_hop.trade_smart_contract.address,
+        first_hop.trade_smart_contract.address.clone(),
         borrow_amount,
-        Some(send_msg_msg),
+        Some(swap_msg(env.contract.address.clone(), first_hop.clone())?),
         None,
         BLOCK_SIZE,
         first_hop.from_token.contract_hash,
@@ -651,6 +639,22 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
     })
+}
+
+fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
+    let swap_msg = if hop.position.is_some() {
+        to_binary(&ReceiveMsg::FillOrder {
+            position: hop.position.unwrap(),
+        })?
+    } else {
+        to_binary(&Snip20Swap::Swap {
+            // set expected_return to None because we don't care about slippage mid-route
+            expected_return: None,
+            // set the recepient of the swap to be this contract (the router)
+            to: Some(contract_address),
+        })?
+    };
+    Ok(swap_msg)
 }
 
 fn handle_hop<S: Storage, A: Api, Q: Querier>(
@@ -715,22 +719,10 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 // not last hop
                 // 1. set expected_return to None because we don't care about slippage mid-route
                 // 2. set the recipient of the swap to be this contract (the router)
-                let send_msg_msg: Binary = if next_hop.position.is_some() {
-                    to_binary(&ReceiveMsg::FillOrder {
-                        position: next_hop.position.unwrap(),
-                    })?
-                } else {
-                    to_binary(&Snip20Swap::Swap {
-                        // set expected_return to None because we don't care about slippage mid-route
-                        expected_return: None,
-                        // set the recepient of the swap to be this contract (the router)
-                        to: Some(env.contract.address.clone()),
-                    })?
-                };
                 msgs.push(snip20::send_msg(
-                    next_hop.trade_smart_contract.address,
+                    next_hop.trade_smart_contract.address.clone(),
                     amount,
-                    Some(send_msg_msg),
+                    Some(swap_msg(env.contract.address.clone(), next_hop.clone())?),
                     None,
                     BLOCK_SIZE,
                     next_hop.from_token.contract_hash,
@@ -1695,6 +1687,158 @@ mod tests {
             }
             _ => panic!("unexpected"),
         }
+    }
+
+    #[test]
+    fn test_handle_first_hop() {
+        let (_init_result, mut deps) = init_helper(true);
+        let borrow_amount: Uint128 = Uint128(555);
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        let first_hop = Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(0),
+        };
+        hops.push_back(first_hop.clone());
+        let handle_msg = HandleMsg::HandleFirstHop {
+            borrow_amount: Uint128(555),
+            hops: hops.clone(),
+        };
+        // when called by an address that is not in the addresses allowed to fill
+        // * it raises an Unauthorized error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_user_address(), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+        // when called by an address that is allowed to fill
+        // = when hops is less than 2
+        // = * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Route must be at least 2 hops.")
+        );
+        // == when there are 2 or more hops
+        hops.push_back(Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(1),
+        });
+        let handle_msg = HandleMsg::HandleFirstHop {
+            borrow_amount,
+            hops: hops.clone(),
+        };
+        let handle_unwrapped = handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
+        // == * it stores the current hop
+        assert_eq!(route_state.current_hop.unwrap(), first_hop);
+        // == * it stores the borrow amount
+        assert_eq!(route_state.remaining_route.borrow_amount, borrow_amount);
+        // == * it stores the borrow token as the first hops from_token
+        assert_eq!(
+            route_state.remaining_route.borrow_token,
+            first_hop.from_token
+        );
+        // == * it stores the address to send left over amount after paying back debt
+        assert_eq!(route_state.remaining_route.to, HumanAddr::from(MOCK_ADMIN));
+        // == * it stores the remaining hops
+        hops.pop_front();
+        assert_eq!(route_state.remaining_route.hops, hops);
+        // === when first hop is to limit order smart contract
+        // === * it sends the token with the right message to the swap contract
+        // === * it sends a message to finalize the contract
+        assert_eq!(
+            handle_unwrapped.messages,
+            vec![
+                snip20::send_msg(
+                    first_hop.trade_smart_contract.address,
+                    borrow_amount,
+                    Some(
+                        to_binary(&ReceiveMsg::FillOrder {
+                            position: first_hop.position.unwrap(),
+                        })
+                        .unwrap()
+                    ),
+                    None,
+                    BLOCK_SIZE,
+                    first_hop.from_token.contract_hash,
+                    first_hop.from_token.address,
+                )
+                .unwrap(),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: mock_contract().address,
+                    callback_code_hash: mock_contract().contract_hash,
+                    msg: to_binary(&HandleMsg::FinalizeRoute {}).unwrap(),
+                    send: vec![],
+                })
+            ]
+        );
+        // === when first hop is to swap contract
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        let first_hop = Hop {
+            from_token: mock_butt(),
+            position: None,
+            trade_smart_contract: mock_contract(),
+        };
+        hops.push_back(first_hop.clone());
+        hops.push_back(Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(1),
+        });
+        let handle_msg = HandleMsg::HandleFirstHop {
+            borrow_amount,
+            hops: hops.clone(),
+        };
+        let handle_unwrapped = handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        // === * it sends the token with the right message to the swap contract
+        // === * it sends a message to finalize the contract
+        assert_eq!(
+            handle_unwrapped.messages,
+            vec![
+                snip20::send_msg(
+                    first_hop.trade_smart_contract.address,
+                    borrow_amount,
+                    Some(
+                        to_binary(&Snip20Swap::Swap {
+                            expected_return: None,
+                            to: Some(mock_contract().address),
+                        })
+                        .unwrap()
+                    ),
+                    None,
+                    BLOCK_SIZE,
+                    first_hop.from_token.contract_hash,
+                    first_hop.from_token.address,
+                )
+                .unwrap(),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: mock_contract().address,
+                    callback_code_hash: mock_contract().contract_hash,
+                    msg: to_binary(&HandleMsg::FinalizeRoute {}).unwrap(),
+                    send: vec![],
+                })
+            ]
+        );
     }
 
     #[test]
