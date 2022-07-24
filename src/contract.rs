@@ -497,14 +497,13 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
             authorize(env.contract.address.clone(), env.message.sender.clone())?;
             if remaining_route.hops.len() != 0 || current_hop.is_some() {
                 return Err(StdError::generic_err(format!(
-                    "cannot finalize: route still contains hops: {:?}",
-                    remaining_route
+                    "Cannot finalize: route still contains hops."
                 )));
             }
             delete_route_state(&mut deps.storage);
             Ok(HandleResponse::default())
         }
-        None => Err(StdError::generic_err("no route to finalize")),
+        None => Err(StdError::generic_err("No route to finalize")),
     }
 }
 
@@ -1701,7 +1700,7 @@ mod tests {
         let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err("no route to finalize")
+            StdError::generic_err("No route to finalize")
         );
 
         // when route state exists
@@ -1743,10 +1742,7 @@ mod tests {
         );
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err(format!(
-                "cannot finalize: route still contains hops: {:?}",
-                route_state.remaining_route
-            ))
+            StdError::generic_err(format!("Cannot finalize: route still contains hops."))
         );
 
         // === when there are no hops but there is a current_hop
@@ -1774,10 +1770,7 @@ mod tests {
         );
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err(format!(
-                "cannot finalize: route still contains hops: {:?}",
-                route_state.remaining_route
-            ))
+            StdError::generic_err(format!("Cannot finalize: route still contains hops."))
         );
         // ==== when there are no hops and no current_hop
         let hops: VecDeque<Hop> = VecDeque::new();
