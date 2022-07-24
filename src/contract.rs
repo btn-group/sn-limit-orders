@@ -607,7 +607,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
         hops,
         borrow_amount,
         borrow_token: first_hop.from_token.clone(),
-        to: env.message.sender.clone(),
+        initiator: env.message.sender.clone(),
         minimum_acceptable_amount,
     };
     store_route_state(
@@ -658,7 +658,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     mut hops,
                     borrow_amount,
                     borrow_token,
-                    to,
+                    initiator,
                     minimum_acceptable_amount,
                 },
         }) => {
@@ -700,10 +700,10 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                         "Operation fell short of minimum_acceptable_amount.",
                     ));
                 }
-                // Send fee to appropriate person
+                // Send fee to initiator
                 if amount.gt(&borrow_amount) {
                     messages.push(snip20::transfer_msg(
-                        to.clone(),
+                        initiator.clone(),
                         (amount - borrow_amount).unwrap(),
                         None,
                         BLOCK_SIZE,
@@ -720,7 +720,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                         hops,
                         borrow_amount,
                         borrow_token,
-                        to,
+                        initiator,
                         minimum_acceptable_amount,
                     },
                 },
@@ -1721,7 +1721,7 @@ mod tests {
                 borrow_token: mock_token(),
                 hops: hops,
                 borrow_amount: Uint128(1_000_000),
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
             },
         };
@@ -1757,7 +1757,7 @@ mod tests {
                 borrow_token: mock_token(),
                 hops: hops,
                 borrow_amount: Uint128(1_000_000),
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
             },
         };
@@ -1780,7 +1780,7 @@ mod tests {
                 borrow_token: mock_token(),
                 hops: hops,
                 borrow_amount: Uint128(1_000_000),
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
             },
         };
@@ -1864,7 +1864,10 @@ mod tests {
             first_hop.from_token
         );
         // == * it stores the address to send left over amount after paying back debt
-        assert_eq!(route_state.remaining_route.to, HumanAddr::from(MOCK_ADMIN));
+        assert_eq!(
+            route_state.remaining_route.initiator,
+            HumanAddr::from(MOCK_ADMIN)
+        );
         // == * it stores the remaining hops
         hops.pop_front();
         assert_eq!(route_state.remaining_route.hops, hops);
@@ -1994,7 +1997,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops,
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
             },
         };
@@ -2059,7 +2062,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops: VecDeque::new(),
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
             }
         );
@@ -2097,7 +2100,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops,
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
             },
         };
@@ -2146,7 +2149,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops: hops.clone(),
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(minimum_acceptable_amount),
             },
         };
@@ -2210,7 +2213,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops: hops.clone(),
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
             },
         };
@@ -2236,7 +2239,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops,
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
             }
         );
@@ -2254,7 +2257,7 @@ mod tests {
                 borrow_token: borrow_token.clone(),
                 hops: hops.clone(),
                 borrow_amount,
-                to: mock_user_address(),
+                initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
             },
         };
@@ -2274,7 +2277,7 @@ mod tests {
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
-                route_state.remaining_route.to,
+                route_state.remaining_route.initiator,
                 Uint128(1),
                 None,
                 BLOCK_SIZE,
