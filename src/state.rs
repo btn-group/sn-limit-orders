@@ -126,7 +126,7 @@ pub struct Route {
     pub borrow_amount: Uint128,
     pub borrow_token: SecretContract,
     pub minimum_acceptable_amount: Option<Uint128>,
-    pub to: HumanAddr,
+    pub initiator: HumanAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
