@@ -644,7 +644,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
 fn handle_hop<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    _from: HumanAddr,
+    from: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
     match read_route_state(&deps.storage)? {
@@ -658,44 +658,20 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     to,
                 },
         }) => {
-            let next_hop: Hop = match hops.pop_front() {
-                Some(next_hop) => next_hop,
-                None => return Err(StdError::generic_err("Route must be at least 1 hop.")),
-            };
-            if env.message.sender != next_hop.from_token.address || current_hop.is_none() {
+            if from != current_hop.unwrap().trade_smart_contract.address {
                 return Err(StdError::generic_err(
-                    "Route can only be called by receiving the token of the next hop from the previous pair.",
+                    "Route called from wrong trade smart contract.",
                 ));
             }
 
-            let mut msgs = vec![];
-            let current_hop = Some(next_hop.clone());
-            if hops.len() == 0 {
-                // last hop
-                // 1. set is_done to true for FinalizeRoute
-                // 2. set expected_return for the final swap
-                // 3. set the recipient of the final swap to be the user
-                if amount.lt(&borrow_amount) {
-                    return Err(StdError::generic_err(
-                        "Operation fell short of minimum_acceptable_amount",
-                    ));
+            let mut messages = vec![];
+            let popped_hop: Option<Hop> = hops.pop_front();
+            if popped_hop.is_some() {
+                let next_hop: Hop = popped_hop.clone().unwrap();
+                if env.message.sender != next_hop.from_token.address {
+                    return Err(StdError::generic_err("Route called by wrong token."));
                 }
-                // Send fee to appropriate person
-                if amount.gt(&borrow_amount) {
-                    msgs.push(snip20::transfer_msg(
-                        to.clone(),
-                        (amount - borrow_amount).unwrap(),
-                        None,
-                        BLOCK_SIZE,
-                        borrow_token.contract_hash.clone(),
-                        borrow_token.address.clone(),
-                    )?);
-                }
-            } else {
-                // not last hop
-                // 1. set expected_return to None because we don't care about slippage mid-route
-                // 2. set the recipient of the swap to be this contract (the router)
-                msgs.push(snip20::send_msg(
+                messages.push(snip20::send_msg(
                     next_hop.trade_smart_contract.address.clone(),
                     amount,
                     Some(swap_msg(env.contract.address.clone(), next_hop.clone())?),
@@ -704,13 +680,33 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     next_hop.from_token.contract_hash,
                     next_hop.from_token.address,
                 )?);
+            } else {
+                if env.message.sender != borrow_token.address {
+                    return Err(StdError::generic_err("Route called by wrong token."));
+                }
+                if amount.lt(&borrow_amount) {
+                    return Err(StdError::generic_err(
+                        "Operation fell short of borrow_amount.",
+                    ));
+                }
+                // Send fee to appropriate person
+                if amount.gt(&borrow_amount) {
+                    messages.push(snip20::transfer_msg(
+                        to.clone(),
+                        (amount - borrow_amount).unwrap(),
+                        None,
+                        BLOCK_SIZE,
+                        borrow_token.contract_hash.clone(),
+                        borrow_token.address.clone(),
+                    )?);
+                }
             }
             store_route_state(
                 &mut deps.storage,
                 &RouteState {
-                    current_hop,
+                    current_hop: popped_hop,
                     remaining_route: Route {
-                        hops, // hops was mutated earlier when we did `hops.pop_front()`
+                        hops,
                         borrow_amount,
                         borrow_token,
                         to,
@@ -719,7 +715,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
             )?;
 
             Ok(HandleResponse {
-                messages: msgs,
+                messages,
                 log: vec![],
                 data: None,
             })
@@ -1921,6 +1917,8 @@ mod tests {
     #[test]
     fn test_handle_hop() {
         let (_init_result, mut deps) = init_helper(true);
+        let borrow_amount: Uint128 = Uint128(MOCK_AMOUNT);
+        let borrow_token: SecretContract = mock_butt();
 
         // when route state does not exist
         // * it raises an error
@@ -1938,6 +1936,273 @@ mod tests {
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("cannot find route")
+        );
+
+        // when route state exists
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        hops.push_back(Hop {
+            from_token: mock_token(),
+            trade_smart_contract: mock_contract(),
+            position: Some(1),
+        });
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_route: Route {
+                borrow_token: borrow_token.clone(),
+                hops,
+                borrow_amount,
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+
+        // = when not called by the current hop's trade smart contract
+        // = * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_butt().address,
+            from: mock_butt().address,
+            amount: Uint128(MOCK_AMOUNT),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Route called from wrong trade smart contract.")
+        );
+
+        // = when from current hop's trade smart contract
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: Uint128(MOCK_AMOUNT),
+            msg: None,
+        };
+        // == when there are hops
+        // === when called by a token different from the next hops from token
+        // === * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Route called by wrong token.")
+        );
+        // === when called by the from token of the next hop
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        // === * it stores the route state with the appropriate info
+        let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
+        assert_eq!(
+            route_state.current_hop,
+            Some(Hop {
+                from_token: mock_token(),
+                trade_smart_contract: mock_contract(),
+                position: Some(1),
+            })
+        );
+        assert_eq!(
+            route_state.remaining_route,
+            Route {
+                borrow_token: borrow_token.clone(),
+                hops: VecDeque::new(),
+                borrow_amount,
+                to: mock_user_address(),
+            }
+        );
+
+        // ==== when the next hop has a position value
+        // ==== * it sends the amount received to the next hop trade smart contract with the correct details
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::send_msg(
+                mock_contract().address,
+                Uint128(MOCK_AMOUNT),
+                Some(to_binary(&ReceiveMsg::FillOrder { position: 1 }).unwrap()),
+                None,
+                BLOCK_SIZE,
+                mock_token().contract_hash,
+                mock_token().address,
+            )
+            .unwrap()]
+        );
+
+        // ==== when the next hop does not have a position value
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        hops.push_back(Hop {
+            from_token: mock_token(),
+            trade_smart_contract: mock_butt(),
+            position: None,
+        });
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_route: Route {
+                borrow_token: borrow_token.clone(),
+                hops,
+                borrow_amount,
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        // ==== * it sends the amount received to the next hop trade smart contract with the correct details
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: Uint128(MOCK_AMOUNT),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::send_msg(
+                mock_butt().address,
+                Uint128(MOCK_AMOUNT),
+                Some(
+                    to_binary(&Snip20Swap::Swap {
+                        expected_return: None,
+                        to: Some(mock_contract().address)
+                    })
+                    .unwrap()
+                ),
+                None,
+                BLOCK_SIZE,
+                mock_token().contract_hash,
+                mock_token().address,
+            )
+            .unwrap()]
+        );
+
+        // == when there are are no hops
+        let hops: VecDeque<Hop> = VecDeque::new();
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_route: Route {
+                borrow_token: borrow_token.clone(),
+                hops: hops.clone(),
+                borrow_amount,
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        // === when not called by the borrowed token
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        // === * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Route called by wrong token.")
+        );
+        // === when called by the borrowed token
+        // ==== when amount sent in is less than the borrowed amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: (borrow_amount - Uint128(1)).unwrap(),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(borrow_token.address.clone(), &[]),
+            handle_msg.clone(),
+        );
+        // ==== * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Operation fell short of borrow_amount.")
+        );
+        // ==== when amount sent in is equal to the borrowed amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: borrow_amount,
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(borrow_token.address.clone(), &[]),
+            handle_msg.clone(),
+        );
+        // ==== * it stores the current hop as None
+        let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
+        assert_eq!(route_state.current_hop, None);
+        // ==== * it stores the rest of the route state appropriately
+        assert_eq!(
+            route_state.remaining_route,
+            Route {
+                borrow_token: borrow_token.clone(),
+                hops,
+                borrow_amount,
+                to: mock_user_address(),
+            }
+        );
+        // ==== * it does not send any messages
+        assert_eq!(handle_result.unwrap().messages, vec![]);
+        // ==== when amount sent in is greater than the borrowed amount
+        let hops: VecDeque<Hop> = VecDeque::new();
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_route: Route {
+                borrow_token: borrow_token.clone(),
+                hops: hops.clone(),
+                borrow_amount,
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: borrow_amount + Uint128(1),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(borrow_token.address.clone(), &[]),
+            handle_msg.clone(),
+        );
+        // ==== * it sends the excess after paying the borrowed amount to the to address
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::transfer_msg(
+                route_state.remaining_route.to,
+                Uint128(1),
+                None,
+                BLOCK_SIZE,
+                borrow_token.contract_hash.clone(),
+                borrow_token.address.clone(),
+            )
+            .unwrap()]
         );
     }
 
