@@ -7,7 +7,7 @@ use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg, Snip20Sw
 use crate::state::{
     delete_route_state, read_registered_token, read_route_state, store_route_state,
     write_registered_token, ActivityRecord, Config, Hop, HumanizedOrder, Order, RegisteredToken,
-    Route, RouteState, SecretContract,
+    RouteState, SecretContract,
 };
 use cosmwasm_std::{
     from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
@@ -489,13 +489,14 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
     match read_route_state(&deps.storage)? {
         Some(RouteState {
             current_hop,
-            remaining_route,
+            remaining_hops,
+            ..
         }) => {
             // this function is called only by the route creation function
             // it is intended to always make sure that the route was completed successfully
             // otherwise we revert the transaction
             authorize(env.contract.address.clone(), env.message.sender.clone())?;
-            if remaining_route.hops.len() != 0 || current_hop.is_some() {
+            if remaining_hops.len() != 0 || current_hop.is_some() {
                 return Err(StdError::generic_err(format!(
                     "Cannot finalize: route still contains hops."
                 )));
@@ -603,20 +604,15 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
 
     // unwrap is cool because `hops.len() >= 2`
     let first_hop: Hop = hops.pop_front().unwrap();
-    let route: Route = Route {
-        hops,
+    let route_state: RouteState = RouteState {
+        current_hop: Some(first_hop.clone()),
+        remaining_hops: hops,
         borrow_amount,
         borrow_token: first_hop.from_token.clone(),
         initiator: env.message.sender.clone(),
         minimum_acceptable_amount,
     };
-    store_route_state(
-        &mut deps.storage,
-        &RouteState {
-            current_hop: Some(first_hop.clone()),
-            remaining_route: route,
-        },
-    )?;
+    store_route_state(&mut deps.storage, &route_state)?;
     let mut msgs = vec![snip20::send_msg(
         first_hop.trade_smart_contract.address.clone(),
         borrow_amount,
@@ -653,14 +649,11 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
     match read_route_state(&deps.storage)? {
         Some(RouteState {
             current_hop,
-            remaining_route:
-                Route {
-                    mut hops,
-                    borrow_amount,
-                    borrow_token,
-                    initiator,
-                    minimum_acceptable_amount,
-                },
+            remaining_hops: mut hops,
+            borrow_amount,
+            borrow_token,
+            minimum_acceptable_amount,
+            initiator,
         }) => {
             if from != current_hop.unwrap().trade_smart_contract.address {
                 return Err(StdError::generic_err(
@@ -716,13 +709,11 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 &mut deps.storage,
                 &RouteState {
                     current_hop: popped_hop,
-                    remaining_route: Route {
-                        hops,
-                        borrow_amount,
-                        borrow_token,
-                        initiator,
-                        minimum_acceptable_amount,
-                    },
+                    remaining_hops: hops,
+                    borrow_amount,
+                    borrow_token,
+                    initiator,
+                    minimum_acceptable_amount,
                 },
             )?;
 
@@ -1717,13 +1708,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(1),
             }),
-            remaining_route: Route {
-                borrow_token: mock_token(),
-                hops: hops,
-                borrow_amount: Uint128(1_000_000),
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: None,
-            },
+            remaining_hops: hops,
+            borrow_token: mock_token(),
+            borrow_amount: Uint128(1_000_000),
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: None,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // == when it isn't called by the contract
@@ -1753,13 +1742,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(1),
             }),
-            remaining_route: Route {
-                borrow_token: mock_token(),
-                hops: hops,
-                borrow_amount: Uint128(1_000_000),
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: None,
-            },
+            remaining_hops: hops,
+            borrow_token: mock_token(),
+            borrow_amount: Uint128(1_000_000),
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: None,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // === * it raises an error
@@ -1776,13 +1763,11 @@ mod tests {
         let hops: VecDeque<Hop> = VecDeque::new();
         let route_state: RouteState = RouteState {
             current_hop: None,
-            remaining_route: Route {
-                borrow_token: mock_token(),
-                hops: hops,
-                borrow_amount: Uint128(1_000_000),
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: None,
-            },
+            remaining_hops: hops,
+            borrow_token: mock_token(),
+            borrow_amount: Uint128(1_000_000),
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: None,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
 
@@ -1857,20 +1842,14 @@ mod tests {
         // == * it stores the current hop
         assert_eq!(route_state.current_hop.unwrap(), first_hop);
         // == * it stores the borrow amount
-        assert_eq!(route_state.remaining_route.borrow_amount, borrow_amount);
+        assert_eq!(route_state.borrow_amount, borrow_amount);
         // == * it stores the borrow token as the first hops from_token
-        assert_eq!(
-            route_state.remaining_route.borrow_token,
-            first_hop.from_token
-        );
+        assert_eq!(route_state.borrow_token, first_hop.from_token);
         // == * it stores the address to send left over amount after paying back debt
-        assert_eq!(
-            route_state.remaining_route.initiator,
-            HumanAddr::from(MOCK_ADMIN)
-        );
+        assert_eq!(route_state.initiator, HumanAddr::from(MOCK_ADMIN));
         // == * it stores the remaining hops
         hops.pop_front();
-        assert_eq!(route_state.remaining_route.hops, hops);
+        assert_eq!(route_state.remaining_hops, hops);
         // === when first hop is to limit order smart contract
         // === * it sends the token with the right message to the swap contract
         // === * it sends a message to finalize the contract
@@ -1993,13 +1972,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(2),
             }),
-            remaining_route: Route {
-                borrow_token: borrow_token.clone(),
-                hops,
-                borrow_amount,
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: Some(borrow_amount),
-            },
+            remaining_hops: hops,
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
 
@@ -2049,18 +2026,15 @@ mod tests {
         // === * it stores the route state with the appropriate info
         let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
         assert_eq!(
-            route_state.current_hop,
-            Some(Hop {
-                from_token: mock_token(),
-                trade_smart_contract: mock_contract(),
-                position: Some(1),
-            })
-        );
-        assert_eq!(
-            route_state.remaining_route,
-            Route {
+            route_state,
+            RouteState {
+                current_hop: Some(Hop {
+                    from_token: mock_token(),
+                    trade_smart_contract: mock_contract(),
+                    position: Some(1),
+                }),
                 borrow_token: borrow_token.clone(),
-                hops: VecDeque::new(),
+                remaining_hops: VecDeque::new(),
                 borrow_amount,
                 initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
@@ -2096,13 +2070,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(2),
             }),
-            remaining_route: Route {
-                borrow_token: borrow_token.clone(),
-                hops,
-                borrow_amount,
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: Some(borrow_amount),
-            },
+            remaining_hops: hops,
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // ==== * it sends the amount received to the next hop trade smart contract with the correct details
@@ -2145,13 +2117,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(2),
             }),
-            remaining_route: Route {
-                borrow_token: borrow_token.clone(),
-                hops: hops.clone(),
-                borrow_amount,
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: Some(minimum_acceptable_amount),
-            },
+            remaining_hops: hops.clone(),
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: Some(minimum_acceptable_amount),
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // === when not called by the borrowed token
@@ -2209,13 +2179,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(2),
             }),
-            remaining_route: Route {
-                borrow_token: borrow_token.clone(),
-                hops: hops.clone(),
-                borrow_amount,
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: None,
-            },
+            remaining_hops: hops.clone(),
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: None,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
@@ -2231,13 +2199,13 @@ mod tests {
         );
         // ==== * it stores the current hop as None
         let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
-        assert_eq!(route_state.current_hop, None);
         // ==== * it stores the rest of the route state appropriately
         assert_eq!(
-            route_state.remaining_route,
-            Route {
+            route_state,
+            RouteState {
+                current_hop: None,
                 borrow_token: borrow_token.clone(),
-                hops,
+                remaining_hops: hops,
                 borrow_amount,
                 initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
@@ -2253,13 +2221,11 @@ mod tests {
                 trade_smart_contract: mock_contract(),
                 position: Some(2),
             }),
-            remaining_route: Route {
-                borrow_token: borrow_token.clone(),
-                hops: hops.clone(),
-                borrow_amount,
-                initiator: mock_user_address(),
-                minimum_acceptable_amount: Some(borrow_amount),
-            },
+            remaining_hops: hops.clone(),
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
@@ -2277,7 +2243,7 @@ mod tests {
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
-                route_state.remaining_route.initiator,
+                route_state.initiator,
                 Uint128(1),
                 None,
                 BLOCK_SIZE,
