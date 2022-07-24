@@ -48,7 +48,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::HandleFirstHop {
             borrow_amount,
             hops,
-        } => handle_first_hop(deps, &env, borrow_amount, hops),
+            minimum_acceptable_amount,
+        } => handle_first_hop(deps, &env, borrow_amount, hops, minimum_acceptable_amount),
         HandleMsg::FinalizeRoute {} => finalize_route(deps, &env),
         HandleMsg::Receive {
             from, amount, msg, ..
@@ -583,6 +584,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     borrow_amount: Uint128,
     mut hops: VecDeque<Hop>,
+    minimum_acceptable_amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     // This is the first msg from the user, with the entire route details
     // 1. save the remaining route to state (e.g. if the route is X/Y -> Y/Z -> Z->W then save Y/Z -> Z/W to state)
@@ -606,6 +608,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
         borrow_amount,
         borrow_token: first_hop.from_token.clone(),
         to: env.message.sender.clone(),
+        minimum_acceptable_amount,
     };
     store_route_state(
         &mut deps.storage,
@@ -656,6 +659,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     borrow_amount,
                     borrow_token,
                     to,
+                    minimum_acceptable_amount,
                 },
         }) => {
             if from != current_hop.unwrap().trade_smart_contract.address {
@@ -689,6 +693,13 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                         "Operation fell short of borrow_amount.",
                     ));
                 }
+                if minimum_acceptable_amount.is_some()
+                    && amount.lt(&minimum_acceptable_amount.unwrap())
+                {
+                    return Err(StdError::generic_err(
+                        "Operation fell short of minimum_acceptable_amount.",
+                    ));
+                }
                 // Send fee to appropriate person
                 if amount.gt(&borrow_amount) {
                     messages.push(snip20::transfer_msg(
@@ -710,6 +721,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                         borrow_amount,
                         borrow_token,
                         to,
+                        minimum_acceptable_amount,
                     },
                 },
             )?;
@@ -1710,6 +1722,7 @@ mod tests {
                 hops: hops,
                 borrow_amount: Uint128(1_000_000),
                 to: mock_user_address(),
+                minimum_acceptable_amount: None,
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
@@ -1748,6 +1761,7 @@ mod tests {
                 hops: hops,
                 borrow_amount: Uint128(1_000_000),
                 to: mock_user_address(),
+                minimum_acceptable_amount: None,
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
@@ -1774,8 +1788,9 @@ mod tests {
         };
         hops.push_back(first_hop.clone());
         let handle_msg = HandleMsg::HandleFirstHop {
-            borrow_amount: Uint128(555),
+            borrow_amount,
             hops: hops.clone(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         // when called by an address that is not in the addresses allowed to fill
         // * it raises an Unauthorized error
@@ -1809,6 +1824,7 @@ mod tests {
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
             hops: hops.clone(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         let handle_unwrapped = handle(
             &mut deps,
@@ -1876,6 +1892,7 @@ mod tests {
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
             hops: hops.clone(),
+            minimum_acceptable_amount: Some(borrow_amount),
         };
         let handle_unwrapped = handle(
             &mut deps,
@@ -1919,6 +1936,7 @@ mod tests {
         let (_init_result, mut deps) = init_helper(true);
         let borrow_amount: Uint128 = Uint128(MOCK_AMOUNT);
         let borrow_token: SecretContract = mock_butt();
+        let minimum_acceptable_amount: Uint128 = borrow_amount + Uint128(1);
 
         // when route state does not exist
         // * it raises an error
@@ -1956,6 +1974,7 @@ mod tests {
                 hops,
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: Some(borrow_amount),
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
@@ -2020,6 +2039,7 @@ mod tests {
                 hops: VecDeque::new(),
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: Some(borrow_amount),
             }
         );
 
@@ -2057,6 +2077,7 @@ mod tests {
                 hops,
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: Some(borrow_amount),
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
@@ -2105,6 +2126,7 @@ mod tests {
                 hops: hops.clone(),
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: Some(minimum_acceptable_amount),
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
@@ -2120,6 +2142,24 @@ mod tests {
             StdError::generic_err("Route called by wrong token.")
         );
         // === when called by the borrowed token
+        // ==== when amount sent in is less than the minimum acceptable amount
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: borrow_amount,
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(borrow_token.address.clone(), &[]),
+            handle_msg.clone(),
+        );
+        // ==== * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Operation fell short of minimum_acceptable_amount.")
+        );
+
         // ==== when amount sent in is less than the borrowed amount
         let handle_msg = HandleMsg::Receive {
             sender: mock_contract().address,
@@ -2138,6 +2178,22 @@ mod tests {
             StdError::generic_err("Operation fell short of borrow_amount.")
         );
         // ==== when amount sent in is equal to the borrowed amount
+        let hops: VecDeque<Hop> = VecDeque::new();
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_route: Route {
+                borrow_token: borrow_token.clone(),
+                hops: hops.clone(),
+                borrow_amount,
+                to: mock_user_address(),
+                minimum_acceptable_amount: None,
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
             sender: mock_contract().address,
             from: mock_contract().address,
@@ -2160,6 +2216,7 @@ mod tests {
                 hops,
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: None,
             }
         );
         // ==== * it does not send any messages
@@ -2177,6 +2234,7 @@ mod tests {
                 hops: hops.clone(),
                 borrow_amount,
                 to: mock_user_address(),
+                minimum_acceptable_amount: Some(borrow_amount),
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();

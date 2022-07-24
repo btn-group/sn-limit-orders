@@ -125,6 +125,7 @@ pub struct Route {
     pub hops: VecDeque<Hop>,
     pub borrow_amount: Uint128,
     pub borrow_token: SecretContract,
+    pub minimum_acceptable_amount: Option<Uint128>,
     pub to: HumanAddr,
 }
 
