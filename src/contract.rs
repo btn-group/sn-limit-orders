@@ -641,36 +641,12 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
-    let swap_msg = if hop.position.is_some() {
-        to_binary(&ReceiveMsg::FillOrder {
-            position: hop.position.unwrap(),
-        })?
-    } else {
-        to_binary(&Snip20Swap::Swap {
-            // set expected_return to None because we don't care about slippage mid-route
-            expected_return: None,
-            // set the recepient of the swap to be this contract (the router)
-            to: Some(contract_address),
-        })?
-    };
-    Ok(swap_msg)
-}
-
 fn handle_hop<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     _from: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // This is a receive msg somewhere along the route
-    // 1. load route from state (Y/Z -> Z/W)
-    // 2. save the remaining route to state (Z/W)
-    // 3. send `amount` Y to pair Y/Z
-
-    // 1'. load route from state (Z/W)
-    // 2'. this is the last hop so delete the entire route state
-    // 3'. send `amount` Z to pair Z/W with recepient `to`
     match read_route_state(&deps.storage)? {
         Some(RouteState {
             current_hop,
@@ -945,6 +921,22 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
     message.reserve(missing);
     message.extend(std::iter::repeat(b' ').take(missing));
     message
+}
+
+fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
+    let swap_msg = if hop.position.is_some() {
+        to_binary(&ReceiveMsg::FillOrder {
+            position: hop.position.unwrap(),
+        })?
+    } else {
+        to_binary(&Snip20Swap::Swap {
+            // set expected_return to None because we don't care about slippage mid-route
+            expected_return: None,
+            // set the recepient of the swap to be this contract (the router)
+            to: Some(contract_address),
+        })?
+    };
+    Ok(swap_msg)
 }
 
 fn update_addresses_allowed_to_fill<S: Storage, A: Api, Q: Querier>(
@@ -1690,6 +1682,91 @@ mod tests {
     }
 
     #[test]
+    fn test_finalize_route() {
+        let (_init_result, mut deps) = init_helper(true);
+        let env = mock_env(mock_user_address(), &[]);
+
+        // when route state does not exist
+        // * it raises an error
+        let handle_msg = HandleMsg::FinalizeRoute {};
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("no route to finalize")
+        );
+
+        // when route state exists
+        // = when there are hops
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        hops.push_back(Hop {
+            from_token: mock_token(),
+            trade_smart_contract: mock_contract(),
+            position: Some(2),
+        });
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_token(),
+                trade_smart_contract: mock_contract(),
+                position: Some(1),
+            }),
+            remaining_route: Route {
+                borrow_token: mock_token(),
+                hops: hops,
+                borrow_amount: Uint128(1_000_000),
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        // == when it isn't called by the contract
+        // == * it raises an error
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::Unauthorized { backtrace: None }
+        );
+        // == when it's called by the contract
+        // == * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_contract().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err(format!(
+                "cannot finalize: route still contains hops: {:?}",
+                route_state.remaining_route
+            ))
+        );
+
+        // === when there are no hops
+        let hops: VecDeque<Hop> = VecDeque::new();
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_token(),
+                trade_smart_contract: mock_contract(),
+                position: Some(1),
+            }),
+            remaining_route: Route {
+                borrow_token: mock_token(),
+                hops: hops,
+                borrow_amount: Uint128(1_000_000),
+                to: mock_user_address(),
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        // === * it returns an Ok response
+        handle(
+            &mut deps,
+            mock_env(mock_contract().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        // === * it deletes the route state
+        assert_eq!(read_route_state(&deps.storage).unwrap().is_none(), true);
+    }
+
+    #[test]
     fn test_handle_first_hop() {
         let (_init_result, mut deps) = init_helper(true);
         let borrow_amount: Uint128 = Uint128(555);
@@ -1838,6 +1915,29 @@ mod tests {
                     send: vec![],
                 })
             ]
+        );
+    }
+
+    #[test]
+    fn test_handle_hop() {
+        let (_init_result, mut deps) = init_helper(true);
+
+        // when route state does not exist
+        // * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: Uint128(MOCK_AMOUNT),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("cannot find route")
         );
     }
 
