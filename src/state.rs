@@ -121,18 +121,13 @@ pub struct Hop {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Route {
-    pub hops: VecDeque<Hop>,
+pub struct RouteState {
+    pub current_hop: Option<Hop>,
+    pub remaining_hops: VecDeque<Hop>,
     pub borrow_amount: Uint128,
     pub borrow_token: SecretContract,
     pub minimum_acceptable_amount: Option<Uint128>,
     pub initiator: HumanAddr,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
-pub struct RouteState {
-    pub current_hop: Option<Hop>,
-    pub remaining_route: Route,
 }
 
 pub fn store_route_state<S: Storage>(storage: &mut S, data: &RouteState) -> StdResult<()> {
