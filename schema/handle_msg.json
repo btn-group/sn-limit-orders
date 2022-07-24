@@ -34,6 +34,16 @@
               "items": {
                 "$ref": "#/definitions/Hop"
               }
+            },
+            "minimum_acceptable_amount": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }

@@ -16,6 +16,7 @@ pub enum HandleMsg {
     HandleFirstHop {
         borrow_amount: Uint128,
         hops: VecDeque<Hop>,
+        minimum_acceptable_amount: Option<Uint128>,
     },
     Receive {
         sender: HumanAddr,
