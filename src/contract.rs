@@ -488,13 +488,14 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match read_route_state(&deps.storage)? {
         Some(RouteState {
-            remaining_route, ..
+            current_hop,
+            remaining_route,
         }) => {
             // this function is called only by the route creation function
             // it is intended to always make sure that the route was completed successfully
             // otherwise we revert the transaction
             authorize(env.contract.address.clone(), env.message.sender.clone())?;
-            if remaining_route.hops.len() != 0 {
+            if remaining_route.hops.len() != 0 || current_hop.is_some() {
                 return Err(StdError::generic_err(format!(
                     "cannot finalize: route still contains hops: {:?}",
                     remaining_route
@@ -1748,7 +1749,7 @@ mod tests {
             ))
         );
 
-        // === when there are no hops
+        // === when there are no hops but there is a current_hop
         let hops: VecDeque<Hop> = VecDeque::new();
         let route_state: RouteState = RouteState {
             current_hop: Some(Hop {
@@ -1765,14 +1766,41 @@ mod tests {
             },
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
-        // === * it returns an Ok response
+        // === * it raises an error
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_contract().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err(format!(
+                "cannot finalize: route still contains hops: {:?}",
+                route_state.remaining_route
+            ))
+        );
+        // ==== when there are no hops and no current_hop
+        let hops: VecDeque<Hop> = VecDeque::new();
+        let route_state: RouteState = RouteState {
+            current_hop: None,
+            remaining_route: Route {
+                borrow_token: mock_token(),
+                hops: hops,
+                borrow_amount: Uint128(1_000_000),
+                to: mock_user_address(),
+                minimum_acceptable_amount: None,
+            },
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+
+        // ==== * it returns an Ok response
         handle(
             &mut deps,
             mock_env(mock_contract().address, &[]),
             handle_msg.clone(),
         )
         .unwrap();
-        // === * it deletes the route state
+        // ==== * it deletes the route state
         assert_eq!(read_route_state(&deps.storage).unwrap().is_none(), true);
     }
 
