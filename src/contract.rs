@@ -644,7 +644,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     from: HumanAddr,
-    amount: Uint128,
+    mut amount: Uint128,
 ) -> StdResult<HandleResponse> {
     match read_route_state(&deps.storage)? {
         Some(RouteState {
@@ -667,6 +667,22 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 let next_hop: Hop = popped_hop.clone().unwrap();
                 if env.message.sender != next_hop.from_token.address {
                     return Err(StdError::generic_err("Route called by wrong token."));
+                }
+                // if the next hop is this contract
+                // check that the amount is less than or equal to that order's unfilled amount
+                // only send in the unfilled amount
+                // we can rescue the dust later when worthwhile while making gas more predictable
+                if next_hop.trade_smart_contract.address == env.contract.address {
+                    let next_trade_order = order_at_position(
+                        &mut deps.storage,
+                        &deps.api.canonical_address(&env.contract.address)?,
+                        next_hop.position.unwrap(),
+                    )?;
+                    let unfilled_amount =
+                        (next_trade_order.net_to_amount - next_trade_order.net_to_amount_filled)?;
+                    if amount.gt(&unfilled_amount) {
+                        amount = unfilled_amount
+                    }
                 }
                 messages.push(snip20::send_msg(
                     next_hop.trade_smart_contract.address.clone(),
@@ -1940,6 +1956,8 @@ mod tests {
         let borrow_amount: Uint128 = Uint128(MOCK_AMOUNT);
         let borrow_token: SecretContract = mock_butt();
         let minimum_acceptable_amount: Uint128 = borrow_amount + Uint128(1);
+        create_order_helper(&mut deps);
+        create_order_helper(&mut deps);
 
         // when route state does not exist
         // * it raises an error
@@ -2042,7 +2060,55 @@ mod tests {
         );
 
         // ==== when the next hop has a position value
-        // ==== * it sends the amount received to the next hop trade smart contract with the correct details
+        // ===== when amount received is equal to or less than the next order's unfilled amount
+        // ===== * it sends the amount received to the next hop trade smart contract with the correct details
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::send_msg(
+                mock_contract().address,
+                Uint128(MOCK_AMOUNT),
+                Some(to_binary(&ReceiveMsg::FillOrder { position: 1 }).unwrap()),
+                None,
+                BLOCK_SIZE,
+                mock_token().contract_hash,
+                mock_token().address,
+            )
+            .unwrap()]
+        );
+
+        // ===== when amount received is greater than the next order's unfilled amount
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        hops.push_back(Hop {
+            from_token: mock_token(),
+            trade_smart_contract: mock_contract(),
+            position: Some(1),
+        });
+        let route_state: RouteState = RouteState {
+            current_hop: Some(Hop {
+                from_token: mock_butt(),
+                trade_smart_contract: mock_contract(),
+                position: Some(2),
+            }),
+            remaining_hops: hops,
+            borrow_token: borrow_token.clone(),
+            borrow_amount,
+            initiator: mock_user_address(),
+            minimum_acceptable_amount: Some(borrow_amount),
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_contract().address,
+            from: mock_contract().address,
+            amount: Uint128(MOCK_AMOUNT + 1),
+            msg: None,
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+
+        // ===== * it sends the next order's unfilled amount
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::send_msg(
