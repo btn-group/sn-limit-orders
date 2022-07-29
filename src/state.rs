@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 // activity (0 => cancelled, 1 => filled)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
 pub struct ActivityRecord {
+    pub order_position: u32,
     pub position: u32,
     pub activity: u8,
     pub result_from_amount_filled: Option<Uint128>,
