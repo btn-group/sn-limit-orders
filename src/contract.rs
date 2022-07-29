@@ -206,6 +206,8 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Amount sent in must be zero."));
     };
 
+    let contract_canonical_address: CanonicalAddr =
+        deps.api.canonical_address(&env.contract.address)?;
     let mut creator_order = order_at_position(
         &mut deps.storage,
         &deps.api.canonical_address(&from)?,
@@ -213,7 +215,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     )?;
     let mut contract_order = order_at_position(
         &mut deps.storage,
-        &deps.api.canonical_address(&env.contract.address)?,
+        &contract_canonical_address,
         creator_order.other_storage_position,
     )?;
     if creator_order.from_token != env.message.sender {
@@ -254,24 +256,26 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     )?;
     update_order(
         &mut deps.storage,
-        &deps.api.canonical_address(&env.contract.address)?,
+        &contract_canonical_address,
         contract_order.clone(),
     )?;
 
     // Create activity record
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: contract_order.position,
+        position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
+        order_position: contract_order.position,
         activity: 0,
         result_from_amount_filled: None,
         result_net_to_amount_filled: None,
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     append_activity_record(
         &mut deps.storage,
         &activity_record,
-        &deps.api.canonical_address(&config.admin)?,
+        &admin_canonical_address,
     )?;
 
     Ok(HandleResponse {
@@ -362,11 +366,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
 
-    let mut contract_order = order_at_position(
-        &mut deps.storage,
-        &deps.api.canonical_address(&env.contract.address)?,
-        position,
-    )?;
+    let contract_canonical_address: CanonicalAddr =
+        deps.api.canonical_address(&env.contract.address)?;
+    let mut contract_order =
+        order_at_position(&mut deps.storage, &contract_canonical_address, position)?;
     let mut creator_order = order_at_position(
         &mut deps.storage,
         &contract_order.creator,
@@ -416,7 +419,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     )?;
     update_order(
         &mut deps.storage,
-        &deps.api.canonical_address(&env.contract.address)?,
+        &contract_canonical_address,
         contract_order.clone(),
     )?;
 
@@ -461,8 +464,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     )?;
 
     // Create activity record
+    let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: contract_order.position,
+        position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
+        order_position: contract_order.position,
         activity: 1,
         result_from_amount_filled: Some(contract_order.from_amount_filled),
         result_net_to_amount_filled: Some(contract_order.net_to_amount_filled),
@@ -472,7 +477,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     append_activity_record(
         &mut deps.storage,
         &activity_record,
-        &deps.api.canonical_address(&config.admin)?,
+        &admin_canonical_address,
     )?;
 
     Ok(HandleResponse {
@@ -538,6 +543,16 @@ fn get_activity_records<S: ReadonlyStorage>(
 
     let activity_records: StdResult<Vec<ActivityRecord>> = activity_record_iter.collect();
     activity_records.map(|activity_records| (activity_records, store.len() as u64))
+}
+
+fn get_next_activity_record_position<S: Storage>(
+    store: &mut S,
+    for_address: &CanonicalAddr,
+) -> StdResult<u32> {
+    let mut store =
+        PrefixedStorage::multilevel(&[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()], store);
+    let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
+    Ok(store.len())
 }
 
 fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> StdResult<u32> {
@@ -1266,7 +1281,8 @@ mod tests {
         assert_eq!(
             activity_records[0],
             ActivityRecord {
-                position: contract_order.position,
+                position: 0,
+                order_position: contract_order.position,
                 activity: 0,
                 result_from_amount_filled: None,
                 result_net_to_amount_filled: None,
@@ -1683,7 +1699,8 @@ mod tests {
                 assert_eq!(
                     activity_records[0],
                     ActivityRecord {
-                        position: contract_order.position,
+                        position: 0,
+                        order_position: contract_order.position,
                         activity: 1,
                         result_from_amount_filled: Some(creator_order.from_amount_filled),
                         result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
