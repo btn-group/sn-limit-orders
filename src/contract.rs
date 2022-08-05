@@ -64,9 +64,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             key,
             token_address,
         } => rescue_tokens(deps, &env, denom, key, token_address),
-        HandleMsg::UpdateAddressesAllowedToFill {
+        HandleMsg::UpdateConfig {
             addresses_allowed_to_fill,
-        } => update_addresses_allowed_to_fill(deps, &env, addresses_allowed_to_fill),
+            execution_fee,
+        } => update_config(deps, &env, addresses_allowed_to_fill, execution_fee),
     }
 }
 
@@ -970,29 +971,36 @@ fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
     Ok(swap_msg)
 }
 
-fn update_addresses_allowed_to_fill<S: Storage, A: Api, Q: Querier>(
+fn update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    addresses_allowed_to_fill: Vec<HumanAddr>,
+    addresses_allowed_to_fill: Option<Vec<HumanAddr>>,
+    execution_fee: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let mut config: Config = config_store.load(CONFIG_KEY).unwrap();
     authorize(env.message.sender.clone(), config.admin.clone())?;
 
-    config.addresses_allowed_to_fill = addresses_allowed_to_fill;
-    if !config
-        .addresses_allowed_to_fill
-        .contains(&env.contract.address)
-    {
-        config
+    if addresses_allowed_to_fill.is_some() {
+        let new_addresses_allowed_to_fill = addresses_allowed_to_fill.unwrap();
+        config.addresses_allowed_to_fill = new_addresses_allowed_to_fill;
+        if !config
             .addresses_allowed_to_fill
-            .push(env.contract.address.clone())
+            .contains(&env.contract.address)
+        {
+            config
+                .addresses_allowed_to_fill
+                .push(env.contract.address.clone())
+        }
+        if !config
+            .addresses_allowed_to_fill
+            .contains(&config.admin.clone())
+        {
+            config.addresses_allowed_to_fill.push(config.admin.clone())
+        }
     }
-    if !config
-        .addresses_allowed_to_fill
-        .contains(&config.admin.clone())
-    {
-        config.addresses_allowed_to_fill.push(config.admin.clone())
+    if execution_fee.is_some() {
+        config.execution_fee = execution_fee.unwrap();
     }
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -2542,11 +2550,12 @@ mod tests {
     }
 
     #[test]
-    fn test_update_addresses_allowed_to_fill() {
+    fn test_update_config() {
         let (_init_result, mut deps) = init_helper(false);
         let new_addresses_allowed_to_fill = vec![mock_user_address()];
-        let handle_msg = HandleMsg::UpdateAddressesAllowedToFill {
-            addresses_allowed_to_fill: new_addresses_allowed_to_fill.clone(),
+        let handle_msg = HandleMsg::UpdateConfig {
+            addresses_allowed_to_fill: Some(new_addresses_allowed_to_fill.clone()),
+            execution_fee: Some(Uint128(MOCK_AMOUNT)),
         };
         let env = mock_env(mock_user_address(), &[]);
         // = when called by a non-admin
@@ -2558,25 +2567,25 @@ mod tests {
         );
 
         // = when called by the admin
-        // = * it updates the addresses_allowed_to_fill and adds admin and contract address
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
         assert_eq!(
             config.addresses_allowed_to_fill,
-            vec![config.admin, env.contract.address]
+            vec![config.admin, env.contract.address.clone()]
         );
+        assert_eq!(config.execution_fee, mock_execution_fee());
         handle(
             &mut deps,
             mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
             handle_msg,
         )
         .unwrap();
+        // = * it updates the addresses_allowed_to_fill and adds admin and contract address
         let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-        let mut adjusted_addresses_allowed_to_fill = new_addresses_allowed_to_fill;
-        adjusted_addresses_allowed_to_fill.push(mock_contract().address);
-        adjusted_addresses_allowed_to_fill.push(HumanAddr(MOCK_ADMIN.to_string()));
         assert_eq!(
             config.addresses_allowed_to_fill,
-            adjusted_addresses_allowed_to_fill
-        )
+            vec![mock_user_address(), env.contract.address, config.admin]
+        );
+        // = * it updates the execution_fee
+        assert_eq!(config.execution_fee, Uint128(MOCK_AMOUNT))
     }
 }

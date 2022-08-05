@@ -34,8 +34,9 @@ pub enum HandleMsg {
         key: Option<String>,
         token_address: Option<HumanAddr>,
     },
-    UpdateAddressesAllowedToFill {
-        addresses_allowed_to_fill: Vec<HumanAddr>,
+    UpdateConfig {
+        addresses_allowed_to_fill: Option<Vec<HumanAddr>>,
+        execution_fee: Option<Uint128>,
     },
 }
 
