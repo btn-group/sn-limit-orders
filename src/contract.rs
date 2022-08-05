@@ -30,6 +30,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         addresses_allowed_to_fill: vec![env.message.sender.clone(), env.contract.address],
         admin: env.message.sender,
         butt: msg.butt,
+        execution_fee: msg.execution_fee,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -1046,7 +1047,10 @@ mod tests {
     ) {
         let env = mock_env(MOCK_ADMIN, &[]);
         let mut deps = mock_dependencies(20, &[]);
-        let msg = InitMsg { butt: mock_butt() };
+        let msg = InitMsg {
+            butt: mock_butt(),
+            execution_fee: mock_execution_fee(),
+        };
         let init_result = init(&mut deps, env.clone(), msg);
         if register_tokens {
             let handle_msg = HandleMsg::RegisterTokens {
@@ -1071,6 +1075,10 @@ mod tests {
             address: env.contract.address,
             contract_hash: env.contract_code_hash,
         }
+    }
+
+    fn mock_execution_fee() -> Uint128 {
+        Uint128(5_555)
     }
 
     fn mock_token() -> SecretContract {
@@ -1306,6 +1314,7 @@ mod tests {
                 ],
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
+                execution_fee: mock_execution_fee(),
             },
             value
         );

@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub butt: SecretContract,
+    pub execution_fee: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

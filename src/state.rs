@@ -24,6 +24,7 @@ pub struct Config {
     pub admin: HumanAddr,
     pub butt: SecretContract,
     pub addresses_allowed_to_fill: Vec<HumanAddr>,
+    pub execution_fee: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]

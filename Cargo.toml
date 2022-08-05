@@ -1,6 +1,6 @@
 [package]
 name = "cw-secret-network-limit-orders"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Steven Chang <steven.chang@btn.group>"]
 edition = "2018"
 
