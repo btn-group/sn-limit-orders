@@ -5,7 +5,8 @@
   "required": [
     "addresses_allowed_to_fill",
     "admin",
-    "butt"
+    "butt",
+    "execution_fee"
   ],
   "properties": {
     "addresses_allowed_to_fill": {
@@ -19,6 +20,9 @@
     },
     "butt": {
       "$ref": "#/definitions/SecretContract"
+    },
+    "execution_fee": {
+      "$ref": "#/definitions/Uint128"
     }
   },
   "definitions": {
@@ -39,6 +43,9 @@
           "type": "string"
         }
       }
+    },
+    "Uint128": {
+      "type": "string"
     }
   }
 }
