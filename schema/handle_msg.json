@@ -150,20 +150,30 @@
     {
       "type": "object",
       "required": [
-        "update_addresses_allowed_to_fill"
+        "update_config"
       ],
       "properties": {
-        "update_addresses_allowed_to_fill": {
+        "update_config": {
           "type": "object",
-          "required": [
-            "addresses_allowed_to_fill"
-          ],
           "properties": {
             "addresses_allowed_to_fill": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "$ref": "#/definitions/HumanAddr"
               }
+            },
+            "execution_fee": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
