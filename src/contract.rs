@@ -105,6 +105,9 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     let response = if msg.is_some() {
         let msg: ReceiveMsg = from_binary(&msg.unwrap())?;
         match msg {
+            ReceiveMsg::AddExecutionFeeToOrder { position } => {
+                add_execution_fee_to_order(deps, &env, from, amount, position)
+            }
             ReceiveMsg::CancelOrder { position } => {
                 cancel_order(deps, &env, from, amount, position)
             }
@@ -146,6 +149,58 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
         total: Some(total),
     };
     to_binary(&result)
+}
+
+fn add_execution_fee_to_order<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    from: HumanAddr,
+    amount: Uint128,
+    position: Option<u32>,
+) -> StdResult<HandleResponse> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    if env.message.sender != config.sscrt.address {
+        return Err(StdError::generic_err("Execution fee token must be SSCRT."));
+    };
+    if config.execution_fee != amount {
+        return Err(StdError::generic_err(
+            "Amount sent in must equal execution fee.",
+        ));
+    };
+
+    let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
+    let order_position: u32 = if position.is_some() {
+        position.unwrap()
+    } else {
+        let next_position: u32 = get_next_position(&mut deps.storage, &user_canonical_address)?;
+        if next_position == 0 {
+            return Err(StdError::generic_err("Order does not exist."));
+        } else {
+            next_position - 1
+        }
+    };
+    let mut user_order =
+        order_at_position(&mut deps.storage, &user_canonical_address, order_position)?;
+    if user_order.execution_fee.is_some() {
+        return Err(StdError::generic_err(
+            "Execution fee already set for order.",
+        ));
+    }
+    if user_order.cancelled {
+        return Err(StdError::generic_err("Order already cancelled."));
+    }
+    if user_order.from_amount == user_order.from_amount_filled {
+        return Err(StdError::generic_err("Order already filled."));
+    }
+
+    user_order.execution_fee = Some(amount);
+    update_order(&mut deps.storage, &user_canonical_address, user_order)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: None,
+    })
 }
 
 fn append_activity_record<S: Storage>(
@@ -1124,6 +1179,169 @@ mod tests {
     }
 
     // === UNIT TESTS ===
+    #[test]
+    fn test_add_execution_fee_to_order() {
+        let (_init_result, mut deps) = init_helper(true);
+        let mut env = mock_env(mock_butt().address, &[]);
+
+        // when token sent in is not sscrt
+        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: None };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: Uint128(1),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        // * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Execution fee token must be SSCRT.")
+        );
+
+        // when token sent in is sscrt
+        env = mock_env(mock_sscrt().address, &[]);
+        // = when amount sent in is not equal to execution fee
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Amount sent in must equal execution fee.")
+        );
+        // = when amount sent in is equal to execution fee
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_execution_fee(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        // == when position is not provided
+        // === when user does not have any orders
+        // ==== * it raises an error
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order does not exist.")
+        );
+        // === when user has at least one order
+        create_order_helper(&mut deps);
+        // ==== when order has fee set already
+        let mut user_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        user_order.execution_fee = Some(Uint128(1));
+        update_order(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            user_order.clone(),
+        )
+        .unwrap();
+        // ==== * it raises an error
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_execution_fee(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Execution fee already set for order.")
+        );
+        // ==== when order does not have execution fee set already
+        // ===== when order is cancelled
+        user_order.execution_fee = None;
+        user_order.cancelled = true;
+        update_order(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            user_order.clone(),
+        )
+        .unwrap();
+        // ===== * it raises an error
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order already cancelled.")
+        );
+        // ===== when order is filled
+        user_order.cancelled = false;
+        user_order.from_amount_filled = user_order.from_amount;
+        update_order(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            user_order.clone(),
+        )
+        .unwrap();
+        // ===== * it raises an error
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Order already filled.")
+        );
+        // ===== when order is open
+        user_order.from_amount_filled = Uint128(0);
+        update_order(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            user_order,
+        )
+        .unwrap();
+        // ===== * it sets the execution fee
+        handle(&mut deps, env.clone(), handle_msg).unwrap();
+        user_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+
+        // == when position is provided
+        // === when order at position doesn't exist
+        // === * it raises an error
+        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: Some(1) };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_execution_fee(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("AppendStorage access out of bounds")
+        );
+        // === when order at position exists
+        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: Some(0) };
+        let handle_msg = HandleMsg::Receive {
+            sender: mock_user_address(),
+            from: mock_user_address(),
+            amount: mock_execution_fee(),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        // ==== when order is able to have execution_fee set
+        user_order.execution_fee = None;
+        update_order(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            user_order,
+        )
+        .unwrap();
+        // ==== * it sets the execution fee
+        handle(&mut deps, env.clone(), handle_msg.clone()).unwrap();
+        user_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+    }
+
     #[test]
     fn test_cancel_order() {
         let (_init_result, mut deps) = init_helper(true);
