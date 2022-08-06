@@ -31,6 +31,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         admin: env.message.sender,
         butt: msg.butt,
         execution_fee: msg.execution_fee,
+        sscrt: msg.sscrt,
     };
     config_store.store(CONFIG_KEY, &config)?;
 
@@ -254,7 +255,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     update_order(
         &mut deps.storage,
         &creator_order.creator.clone(),
-        creator_order,
+        creator_order.clone(),
     )?;
     update_order(
         &mut deps.storage,
@@ -279,6 +280,18 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         &activity_record,
         &admin_canonical_address,
     )?;
+
+    // If order has an execution fee and it has not been spent, send it back to the user
+    if creator_order.execution_fee.is_some() && creator_order.from_amount_filled.is_zero() {
+        messages.push(snip20::transfer_msg(
+            deps.api.human_address(&creator_order.creator)?,
+            creator_order.execution_fee.unwrap(),
+            None,
+            BLOCK_SIZE,
+            config.sscrt.contract_hash,
+            config.sscrt.address,
+        )?);
+    }
 
     Ok(HandleResponse {
         messages,
@@ -1031,6 +1044,7 @@ mod tests {
 
     pub const MOCK_ADMIN: &str = "admin";
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
+    pub const MOCK_SSCRT_ADDRESS: &str = "mock-sscrt-address";
 
     // === HELPERS ===
     fn create_order_helper<S: Storage, A: Api, Q: Querier>(deps: &mut Extern<S, A, Q>) {
@@ -1059,6 +1073,7 @@ mod tests {
         let msg = InitMsg {
             butt: mock_butt(),
             execution_fee: mock_execution_fee(),
+            sscrt: mock_sscrt(),
         };
         let init_result = init(&mut deps, env.clone(), msg);
         if register_tokens {
@@ -1088,6 +1103,13 @@ mod tests {
 
     fn mock_execution_fee() -> Uint128 {
         Uint128(5_555)
+    }
+
+    fn mock_sscrt() -> SecretContract {
+        SecretContract {
+            address: HumanAddr::from(MOCK_SSCRT_ADDRESS),
+            contract_hash: "mock-sscrt-contract-hash".to_string(),
+        }
     }
 
     fn mock_token() -> SecretContract {
@@ -1251,7 +1273,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
@@ -1259,19 +1281,19 @@ mod tests {
                 (creator_order.from_amount - creator_order.from_amount_filled).unwrap(),
                 None,
                 BLOCK_SIZE,
-                from_registered_token.contract_hash,
-                from_registered_token.address,
+                from_registered_token.contract_hash.clone(),
+                from_registered_token.address.clone(),
             )
             .unwrap()]
         );
         // === * it sets cancelled to true
-        let creator_order = order_at_position(
+        let mut creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
             0,
         )
         .unwrap();
-        let contract_order = order_at_position(
+        let mut contract_order = order_at_position(
             &mut deps.storage,
             &deps
                 .api
@@ -1306,7 +1328,93 @@ mod tests {
                 updated_at_block_height: env.block.height.clone(),
                 updated_at_block_time: env.block.time
             }
+        );
+        // ==== when order has an execution fee
+        creator_order.execution_fee = Some(Uint128(1));
+        creator_order.cancelled = false;
+        creator_order.from_amount_filled = Uint128(1);
+        contract_order.execution_fee = Some(Uint128(1));
+        contract_order.cancelled = false;
+        contract_order.from_amount_filled = Uint128(1);
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
         )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+
+        // ===== when order is partially filled
+        // ===== * it does not send the execution fee back to the creator
+        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![snip20::transfer_msg(
+                deps.api.human_address(&creator_order.creator).unwrap(),
+                (creator_order.from_amount - creator_order.from_amount_filled).unwrap(),
+                None,
+                BLOCK_SIZE,
+                from_registered_token.contract_hash.clone(),
+                from_registered_token.address.clone(),
+            )
+            .unwrap()]
+        );
+
+        // ===== when order has not been partially filled
+        creator_order.execution_fee = Some(Uint128(1));
+        creator_order.cancelled = false;
+        creator_order.from_amount_filled = Uint128(0);
+        contract_order.execution_fee = Some(Uint128(1));
+        contract_order.cancelled = false;
+        contract_order.from_amount_filled = Uint128(0);
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order,
+        )
+        .unwrap();
+        // ===== * it sends the execution fee back to the creator
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![
+                snip20::transfer_msg(
+                    deps.api.human_address(&creator_order.creator).unwrap(),
+                    (creator_order.from_amount - creator_order.from_amount_filled).unwrap(),
+                    None,
+                    BLOCK_SIZE,
+                    from_registered_token.contract_hash,
+                    from_registered_token.address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    deps.api.human_address(&creator_order.creator).unwrap(),
+                    creator_order.execution_fee.unwrap(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_sscrt().contract_hash,
+                    mock_sscrt().address,
+                )
+                .unwrap()
+            ]
+        );
     }
 
     #[test]
@@ -1324,6 +1432,7 @@ mod tests {
                 admin: HumanAddr::from(MOCK_ADMIN),
                 butt: mock_butt(),
                 execution_fee: mock_execution_fee(),
+                sscrt: mock_sscrt(),
             },
             value
         );

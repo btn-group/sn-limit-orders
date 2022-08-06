@@ -6,7 +6,8 @@
     "addresses_allowed_to_fill",
     "admin",
     "butt",
-    "execution_fee"
+    "execution_fee",
+    "sscrt"
   ],
   "properties": {
     "addresses_allowed_to_fill": {
@@ -23,6 +24,9 @@
     },
     "execution_fee": {
       "$ref": "#/definitions/Uint128"
+    },
+    "sscrt": {
+      "$ref": "#/definitions/SecretContract"
     }
   },
   "definitions": {

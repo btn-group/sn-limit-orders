@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "butt",
-    "execution_fee"
+    "execution_fee",
+    "sscrt"
   ],
   "properties": {
     "butt": {
@@ -12,6 +13,9 @@
     },
     "execution_fee": {
       "$ref": "#/definitions/Uint128"
+    },
+    "sscrt": {
+      "$ref": "#/definitions/SecretContract"
     }
   },
   "definitions": {
