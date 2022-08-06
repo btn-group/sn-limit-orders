@@ -74,6 +74,9 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
+    SetExecutionFeeForOrder {
+        position: Option<u32>,
+    },
     CancelOrder {
         position: u32,
     },
