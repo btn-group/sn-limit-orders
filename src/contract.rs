@@ -105,8 +105,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     let response = if msg.is_some() {
         let msg: ReceiveMsg = from_binary(&msg.unwrap())?;
         match msg {
-            ReceiveMsg::AddExecutionFeeToOrder { position } => {
-                add_execution_fee_to_order(deps, &env, from, amount, position)
+            ReceiveMsg::SetExecutionFeeForOrder { position } => {
+                set_execution_fee_for_order(deps, &env, from, amount, position)
             }
             ReceiveMsg::CancelOrder { position } => {
                 cancel_order(deps, &env, from, amount, position)
@@ -151,7 +151,7 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
     to_binary(&result)
 }
 
-fn add_execution_fee_to_order<S: Storage, A: Api, Q: Querier>(
+fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     from: HumanAddr,
@@ -1180,12 +1180,12 @@ mod tests {
 
     // === UNIT TESTS ===
     #[test]
-    fn test_add_execution_fee_to_order() {
+    fn test_set_execution_fee_for_order() {
         let (_init_result, mut deps) = init_helper(true);
         let mut env = mock_env(mock_butt().address, &[]);
 
         // when token sent in is not sscrt
-        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: None };
+        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: None };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
@@ -1303,7 +1303,7 @@ mod tests {
         // == when position is provided
         // === when order at position doesn't exist
         // === * it raises an error
-        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: Some(1) };
+        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: Some(1) };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
@@ -1316,7 +1316,7 @@ mod tests {
             StdError::generic_err("AppendStorage access out of bounds")
         );
         // === when order at position exists
-        let receive_msg = ReceiveMsg::AddExecutionFeeToOrder { position: Some(0) };
+        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: Some(0) };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
