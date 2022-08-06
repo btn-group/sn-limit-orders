@@ -327,6 +327,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let creator_order_position = get_next_position(&mut deps.storage, &creator_address)?;
     let creator_order = Order {
         position: creator_order_position,
+        execution_fee: None,
         other_storage_position: contract_order_position,
         from_token: env.message.sender.clone(),
         to_token: to_token,
@@ -1447,6 +1448,7 @@ mod tests {
         // == * it stores the order for the smart_contract
         let order: Order = Order {
             position: 0,
+            execution_fee: None,
             other_storage_position: 0,
             from_token: mock_butt().address,
             to_token: mock_token().address,

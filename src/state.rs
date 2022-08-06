@@ -66,6 +66,7 @@ pub fn write_registered_token<S: Storage>(
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug)]
 pub struct HumanizedOrder {
     pub creator: HumanAddr,
+    pub execution_fee: Option<Uint128>,
     pub position: u32,
     pub from_token: HumanAddr,
     pub to_token: HumanAddr,
@@ -82,6 +83,7 @@ pub struct HumanizedOrder {
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 pub struct Order {
     pub creator: CanonicalAddr,
+    pub execution_fee: Option<Uint128>,
     pub position: u32,
     pub other_storage_position: u32,
     pub from_token: HumanAddr,
@@ -99,6 +101,7 @@ impl Order {
     pub fn into_humanized<A: Api>(self, api: &A) -> StdResult<HumanizedOrder> {
         Ok(HumanizedOrder {
             creator: api.human_address(&self.creator)?,
+            execution_fee: self.execution_fee,
             position: self.position,
             from_token: self.from_token,
             to_token: self.to_token,
