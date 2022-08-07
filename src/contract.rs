@@ -168,6 +168,8 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
         ));
     };
 
+    let contract_canonical_address: CanonicalAddr =
+        deps.api.canonical_address(&env.contract.address)?;
     let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
     let order_position: u32 = if position.is_some() {
         position.unwrap()
@@ -181,6 +183,12 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     };
     let mut user_order =
         order_at_position(&mut deps.storage, &user_canonical_address, order_position)?;
+    let mut contract_order = order_at_position(
+        &mut deps.storage,
+        &contract_canonical_address,
+        user_order.other_storage_position,
+    )?;
+
     if user_order.execution_fee.is_some() {
         return Err(StdError::generic_err(
             "Execution fee already set for order.",
@@ -193,7 +201,13 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Order already filled."));
     }
 
+    contract_order.execution_fee = Some(amount);
     user_order.execution_fee = Some(amount);
+    update_order(
+        &mut deps.storage,
+        &contract_canonical_address,
+        contract_order,
+    )?;
     update_order(&mut deps.storage, &user_canonical_address, user_order)?;
 
     Ok(HandleResponse {
@@ -467,13 +481,9 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     let mut address_to_send_execution_fee_to: Option<HumanAddr> = None;
     if contract_order.from_amount_filled.is_zero() {
         if contract_order.execution_fee.is_some() {
-            match read_route_state(&deps.storage)? {
-                Some(RouteState { initiator, .. }) => {
-                    address_to_send_execution_fee_to = Some(initiator);
-                }
-                None => {
-                    address_to_send_execution_fee_to = Some(from.clone());
-                }
+            address_to_send_execution_fee_to = match read_route_state(&deps.storage)? {
+                Some(RouteState { initiator, .. }) => Some(initiator),
+                None => Some(from.clone()),
             }
         }
     }
@@ -1314,7 +1324,7 @@ mod tests {
             user_order,
         )
         .unwrap();
-        // ===== * it sets the execution fee
+        // ===== * it sets the execution fee for the user order
         handle(&mut deps, env.clone(), handle_msg).unwrap();
         user_order = order_at_position(
             &mut deps.storage,
@@ -1323,6 +1333,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+        // ===== * it sets the execution fee for the contract order
+        let contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            user_order.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(contract_order.execution_fee, Some(mock_execution_fee()));
 
         // == when position is provided
         // === when order at position doesn't exist
@@ -1355,7 +1376,7 @@ mod tests {
             user_order,
         )
         .unwrap();
-        // ==== * it sets the execution fee
+        // ==== * it sets the execution fee for user_order
         handle(&mut deps, env.clone(), handle_msg.clone()).unwrap();
         user_order = order_at_position(
             &mut deps.storage,
@@ -1364,6 +1385,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+        // ==== * it sets the execution fee for the contract order
+        let contract_order = order_at_position(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            user_order.other_storage_position,
+        )
+        .unwrap();
+        assert_eq!(contract_order.execution_fee, user_order.execution_fee);
     }
 
     #[test]
@@ -1970,19 +2002,23 @@ mod tests {
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
             from: config.admin.clone(),
-            amount: Uint128(MOCK_AMOUNT),
+            amount: Uint128(MOCK_AMOUNT / 2),
             msg: Some(to_binary(&receive_msg).unwrap()),
         };
-        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
         // ===== * it updates the from amount filled for both orders
         // ===== * it updates the net to amount filled
-        let creator_order = order_at_position(
+        let mut creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
             0,
         )
         .unwrap();
-        let contract_order = order_at_position(
+        let mut contract_order = order_at_position(
             &mut deps.storage,
             &deps
                 .api
@@ -1991,18 +2027,29 @@ mod tests {
             creator_order.other_storage_position,
         )
         .unwrap();
-        assert_eq!(creator_order.from_amount_filled, creator_order.from_amount);
+        assert_eq!(
+            creator_order.from_amount_filled,
+            creator_order
+                .from_amount
+                .multiply_ratio(Uint128(1), Uint128(2))
+        );
         assert_eq!(
             contract_order.from_amount_filled,
-            contract_order.from_amount
+            contract_order
+                .from_amount
+                .multiply_ratio(Uint128(1), Uint128(2))
         );
         assert_eq!(
             creator_order.net_to_amount_filled,
-            creator_order.net_to_amount
+            creator_order
+                .net_to_amount
+                .multiply_ratio(Uint128(1), Uint128(2))
         );
         assert_eq!(
             contract_order.net_to_amount_filled,
-            contract_order.net_to_amount
+            contract_order
+                .net_to_amount
+                .multiply_ratio(Uint128(1), Uint128(2))
         );
 
         // ===== * it sends the correct ratio of the from_token to the admin
@@ -2011,8 +2058,8 @@ mod tests {
             handle_result.unwrap().messages,
             vec![
                 snip20::send_msg(
-                    config.admin,
-                    Uint128(MOCK_AMOUNT),
+                    config.admin.clone(),
+                    Uint128(MOCK_AMOUNT / 2),
                     None,
                     None,
                     BLOCK_SIZE,
@@ -2022,7 +2069,7 @@ mod tests {
                 .unwrap(),
                 snip20::transfer_msg(
                     mock_user_address(),
-                    Uint128(MOCK_AMOUNT),
+                    Uint128(MOCK_AMOUNT / 2),
                     None,
                     BLOCK_SIZE,
                     mock_token().contract_hash,
@@ -2041,7 +2088,12 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(from_registered_token.sum_balance, Uint128(0));
+        assert_eq!(
+            from_registered_token.sum_balance,
+            creator_order
+                .net_to_amount
+                .multiply_ratio(Uint128(1), Uint128(2))
+        );
         // ===== * it does not update the to tokens sum balance
         let to_registered_token: RegisteredToken = read_registered_token(
             &deps.storage,
@@ -2080,7 +2132,196 @@ mod tests {
                 )
             }
             _ => panic!("unexpected"),
-        }
+        };
+        // ====== when order has an execution fee
+        contract_order.execution_fee = Some(Uint128(1));
+        creator_order.execution_fee = Some(Uint128(1));
+        // ======= when order is partially filled
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        // ====== * it does not send the execution fee
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin.clone(),
+            amount: Uint128(MOCK_AMOUNT / 4),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![
+                snip20::send_msg(
+                    config.admin.clone(),
+                    Uint128(MOCK_AMOUNT / 4),
+                    None,
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    mock_user_address(),
+                    Uint128(MOCK_AMOUNT / 4),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap(),
+            ]
+        );
+
+        // ======= when order is completely unfilled
+        contract_order.from_amount_filled = Uint128(0);
+        creator_order.from_amount_filled = Uint128(0);
+        contract_order.net_to_amount_filled = Uint128(0);
+        creator_order.net_to_amount_filled = Uint128(0);
+        contract_order.execution_fee = Some(Uint128(1));
+        creator_order.execution_fee = Some(Uint128(1));
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+
+        // ======== when route state exists
+        let route_state: RouteState = RouteState {
+            current_hop: None,
+            remaining_hops: VecDeque::new(),
+            borrow_amount: Uint128(5),
+            borrow_token: mock_sscrt(),
+            initiator: mock_contract().address,
+            minimum_acceptable_amount: Some(Uint128(5)),
+        };
+        store_route_state(&mut deps.storage, &route_state).unwrap();
+        // ======== * it sends the execution fee to the route initiator
+        let handle_msg = HandleMsg::Receive {
+            sender: config.admin.clone(),
+            from: config.admin.clone(),
+            amount: Uint128(MOCK_AMOUNT / 8),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        let handle_result = handle(
+            &mut deps,
+            mock_env(mock_token().address, &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![
+                snip20::send_msg(
+                    config.admin.clone(),
+                    Uint128(MOCK_AMOUNT / 8),
+                    None,
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    mock_user_address(),
+                    Uint128(MOCK_AMOUNT / 8),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    mock_contract().address,
+                    contract_order.execution_fee.unwrap(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_sscrt().contract_hash,
+                    mock_sscrt().address,
+                )
+                .unwrap(),
+            ]
+        );
+
+        // ======== when route state does not exist
+        contract_order.from_amount_filled = Uint128(0);
+        creator_order.from_amount_filled = Uint128(0);
+        contract_order.net_to_amount_filled = Uint128(0);
+        creator_order.net_to_amount_filled = Uint128(0);
+        contract_order.execution_fee = Some(Uint128(1));
+        creator_order.execution_fee = Some(Uint128(1));
+        update_order(
+            &mut deps.storage,
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
+            contract_order.clone(),
+        )
+        .unwrap();
+        update_order(
+            &mut deps.storage,
+            &creator_order.creator.clone(),
+            creator_order.clone(),
+        )
+        .unwrap();
+        delete_route_state(&mut deps.storage);
+        // ======== * it sends the execution fee to the user calling the function
+        let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
+        assert_eq!(
+            handle_result.unwrap().messages,
+            vec![
+                snip20::send_msg(
+                    config.admin.clone(),
+                    Uint128(MOCK_AMOUNT / 8),
+                    None,
+                    None,
+                    BLOCK_SIZE,
+                    mock_butt().contract_hash,
+                    mock_butt().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    mock_user_address(),
+                    Uint128(MOCK_AMOUNT / 8),
+                    None,
+                    BLOCK_SIZE,
+                    mock_token().contract_hash,
+                    mock_token().address,
+                )
+                .unwrap(),
+                snip20::transfer_msg(
+                    config.admin,
+                    contract_order.execution_fee.unwrap(),
+                    None,
+                    BLOCK_SIZE,
+                    mock_sscrt().contract_hash,
+                    mock_sscrt().address,
+                )
+                .unwrap(),
+            ]
+        );
     }
 
     #[test]
