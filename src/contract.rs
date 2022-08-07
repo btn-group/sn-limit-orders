@@ -290,20 +290,30 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Order already filled."));
     }
 
-    let from_token: RegisteredToken = read_registered_token(
+    let mut from_registered_token: RegisteredToken = read_registered_token(
         &deps.storage,
         &deps.api.canonical_address(&creator_order.from_token)?,
     )
     .unwrap();
+    let unfilled_amount: Uint128 = (creator_order.from_amount - creator_order.from_amount_filled)?;
+
+    // Update from_registered_token balance
+    from_registered_token.sum_balance = (from_registered_token.sum_balance - unfilled_amount)?;
+    write_registered_token(
+        &mut deps.storage,
+        &deps.api.canonical_address(&from_registered_token.address)?,
+        from_registered_token.clone(),
+    )?;
+
     // Send refund to the creator
     let mut messages: Vec<CosmosMsg> = vec![];
     messages.push(snip20::transfer_msg(
         deps.api.human_address(&creator_order.creator)?,
-        (creator_order.from_amount - creator_order.from_amount_filled)?,
+        unfilled_amount,
         None,
         BLOCK_SIZE,
-        from_token.contract_hash,
-        from_token.address,
+        from_registered_token.contract_hash,
+        from_registered_token.address,
     )?);
 
     // Update Txs
@@ -1505,7 +1515,7 @@ mod tests {
             StdError::generic_err("Order already filled.")
         );
         // === when order can be cancelled
-        creator_order.from_amount_filled = Uint128(1);
+        creator_order.from_amount_filled = Uint128(5);
         update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &creator_order.creator,
@@ -1516,7 +1526,6 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        // === * it sends the unfilled from token amount back to the creator
         let from_registered_token: RegisteredToken = read_registered_token(
             &deps.storage,
             &deps
@@ -1525,12 +1534,30 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
+        let sum_balance_before_cancel: Uint128 = from_registered_token.sum_balance;
         let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        // === * it reduces the from token's sum_balance by the unfilled amount
+        let from_registered_token: RegisteredToken = read_registered_token(
+            &deps.storage,
+            &deps
+                .api
+                .canonical_address(&creator_order.from_token)
+                .unwrap(),
+        )
+        .unwrap();
+        let unfilled_amount: Uint128 =
+            (creator_order.from_amount - creator_order.from_amount_filled).unwrap();
+        assert_eq!(
+            from_registered_token.sum_balance,
+            (sum_balance_before_cancel - unfilled_amount).unwrap()
+        );
+
+        // === * it sends the unfilled from token amount back to the creator
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
                 deps.api.human_address(&creator_order.creator).unwrap(),
-                (creator_order.from_amount - creator_order.from_amount_filled).unwrap(),
+                unfilled_amount,
                 None,
                 BLOCK_SIZE,
                 from_registered_token.contract_hash.clone(),
@@ -1584,7 +1611,7 @@ mod tests {
         // ==== when order has an execution fee
         creator_order.execution_fee = Some(Uint128(1));
         creator_order.cancelled = false;
-        creator_order.from_amount_filled = Uint128(1);
+        creator_order.from_amount_filled = Uint128(999999999999);
         update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &creator_order.creator,
@@ -1612,6 +1639,7 @@ mod tests {
         );
 
         // ===== when order has not been partially filled
+        creator_order.from_amount = Uint128(1);
         creator_order.execution_fee = Some(Uint128(1));
         creator_order.cancelled = false;
         creator_order.from_amount_filled = Uint128(0);
