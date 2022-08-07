@@ -464,6 +464,20 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
+    let mut address_to_send_execution_fee_to: Option<HumanAddr> = None;
+    if contract_order.from_amount_filled.is_zero() {
+        if contract_order.execution_fee.is_some() {
+            match read_route_state(&deps.storage)? {
+                Some(RouteState { initiator, .. }) => {
+                    address_to_send_execution_fee_to = Some(initiator);
+                }
+                None => {
+                    address_to_send_execution_fee_to = Some(from.clone());
+                }
+            }
+        }
+    }
+
     // Update net_to_amount_filled and from_amount_filled
     contract_order.net_to_amount_filled += amount;
     creator_order.net_to_amount_filled += amount;
@@ -506,7 +520,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&creator_order.to_token)?,
     )
     .unwrap();
-    let messages: Vec<CosmosMsg> = vec![
+    let mut messages: Vec<CosmosMsg> = vec![
         snip20::send_msg(
             from,
             from_filled_amount,
@@ -525,6 +539,16 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
             to_registered_token.address,
         )?,
     ];
+    if address_to_send_execution_fee_to.is_some() {
+        messages.push(snip20::transfer_msg(
+            address_to_send_execution_fee_to.unwrap(),
+            creator_order.execution_fee.unwrap(),
+            None,
+            BLOCK_SIZE,
+            config.sscrt.contract_hash,
+            config.sscrt.address,
+        )?)
+    }
 
     // Update from_token balance
     from_registered_token.sum_balance = (from_registered_token.sum_balance - from_filled_amount)?;
