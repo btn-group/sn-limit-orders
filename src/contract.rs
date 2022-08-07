@@ -1114,13 +1114,25 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order) -> StdResult<()> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
+fn update_user_order_and_corresponding_contract_order<S: Storage>(
+    store: &mut S,
+    user_address: &CanonicalAddr,
+    user_order: Order,
+    contract_address: &CanonicalAddr,
+) -> StdResult<()> {
+    let mut user_store =
+        PrefixedStorage::multilevel(&[PREFIX_ORDERS, user_address.as_slice()], store);
     // Try to access the storage of orders for the account.
     // If it doesn't exist yet, return an empty list of transfers.
-    let mut store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut store)?;
-    store.set_at(order.position, &order)?;
-
+    let mut user_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut user_store)?;
+    user_store.set_at(user_order.position, &user_order)?;
+    let mut contract_store =
+        PrefixedStorage::multilevel(&[PREFIX_ORDERS, contract_address.as_slice()], store);
+    let mut contract_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut contract_store)?;
+    let mut contract_order: Order = user_order.clone();
+    contract_order.position = user_order.other_storage_position;
+    contract_order.other_storage_position = user_order.position;
+    contract_store.set_at(contract_order.position, &contract_order)?;
     Ok(())
 }
 
