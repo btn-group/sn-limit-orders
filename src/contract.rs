@@ -1468,15 +1468,6 @@ mod tests {
             0,
         )
         .unwrap();
-        let mut contract_order = order_at_position(
-            &mut deps.storage,
-            &deps
-                .api
-                .canonical_address(&mock_contract().address)
-                .unwrap(),
-            creator_order.other_storage_position,
-        )
-        .unwrap();
         creator_order.cancelled = true;
         update_creator_order_and_associated_contract_order(
             &mut deps.storage,
@@ -1497,7 +1488,6 @@ mod tests {
         // === when order is filled
         creator_order.cancelled = false;
         creator_order.from_amount_filled = creator_order.from_amount;
-        contract_order.from_amount_filled = contract_order.from_amount;
         update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &creator_order.creator,
