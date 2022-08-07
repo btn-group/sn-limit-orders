@@ -181,34 +181,27 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
             next_position - 1
         }
     };
-    let mut user_order =
+    let mut creator_order =
         order_at_position(&mut deps.storage, &user_canonical_address, order_position)?;
-    let mut contract_order = order_at_position(
-        &mut deps.storage,
-        &contract_canonical_address,
-        user_order.other_storage_position,
-    )?;
-
-    if user_order.execution_fee.is_some() {
+    if creator_order.execution_fee.is_some() {
         return Err(StdError::generic_err(
             "Execution fee already set for order.",
         ));
     }
-    if user_order.cancelled {
+    if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
-    if user_order.from_amount == user_order.from_amount_filled {
+    if creator_order.from_amount == creator_order.from_amount_filled {
         return Err(StdError::generic_err("Order already filled."));
     }
 
-    contract_order.execution_fee = Some(amount);
-    user_order.execution_fee = Some(amount);
-    update_order(
+    creator_order.execution_fee = Some(amount);
+    update_creator_order_and_associated_contract_order(
         &mut deps.storage,
+        &user_canonical_address,
+        creator_order,
         &contract_canonical_address,
-        contract_order,
     )?;
-    update_order(&mut deps.storage, &user_canonical_address, user_order)?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -285,11 +278,6 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&from)?,
         position,
     )?;
-    let mut contract_order = order_at_position(
-        &mut deps.storage,
-        &contract_canonical_address,
-        creator_order.other_storage_position,
-    )?;
     if creator_order.from_token != env.message.sender {
         return Err(StdError::generic_err(
             "Token used to cancel does not match the from token of order.",
@@ -320,24 +308,18 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
 
     // Update Txs
     creator_order.cancelled = true;
-    contract_order.cancelled = true;
-    update_order(
+    update_creator_order_and_associated_contract_order(
         &mut deps.storage,
         &creator_order.creator.clone(),
         creator_order.clone(),
-    )?;
-    update_order(
-        &mut deps.storage,
         &contract_canonical_address,
-        contract_order.clone(),
     )?;
-
     // Create activity record
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
         position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
-        order_position: contract_order.position,
+        order_position: creator_order.other_storage_position,
         activity: 0,
         result_from_amount_filled: None,
         result_net_to_amount_filled: None,
@@ -453,7 +435,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
 
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
-    let mut contract_order =
+    let contract_order =
         order_at_position(&mut deps.storage, &contract_canonical_address, position)?;
     let mut creator_order = order_at_position(
         &mut deps.storage,
@@ -479,43 +461,35 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     }
 
     let mut address_to_send_execution_fee_to: Option<HumanAddr> = None;
-    if contract_order.from_amount_filled.is_zero() {
-        if contract_order.execution_fee.is_some() {
+    if creator_order.from_amount_filled.is_zero() {
+        if creator_order.execution_fee.is_some() {
             address_to_send_execution_fee_to = match read_route_state(&deps.storage)? {
                 Some(RouteState { initiator, .. }) => Some(initiator),
                 None => Some(from.clone()),
             }
         }
     }
-
     // Update net_to_amount_filled and from_amount_filled
-    contract_order.net_to_amount_filled += amount;
     creator_order.net_to_amount_filled += amount;
-    let from_filled_amount: Uint128 =
-        if contract_order.net_to_amount_filled == contract_order.net_to_amount {
-            (contract_order.from_amount - contract_order.from_amount_filled)?
-        } else {
-            let f = U256::from(contract_order.from_amount.u128())
-                .checked_mul(U256::from(amount.u128()));
-            if f.is_none() {
-                return Err(StdError::generic_err(
-                    "Overflow error while calculating from_filled_amount.",
-                ));
-            }
-
-            Uint128::from((f.unwrap() / U256::from(contract_order.net_to_amount.u128())).as_u128())
-        };
-    contract_order.from_amount_filled += from_filled_amount;
+    let from_filled_amount: Uint128 = if creator_order.net_to_amount_filled
+        == creator_order.net_to_amount
+    {
+        (creator_order.from_amount - creator_order.from_amount_filled)?
+    } else {
+        let f = U256::from(creator_order.from_amount.u128()).checked_mul(U256::from(amount.u128()));
+        if f.is_none() {
+            return Err(StdError::generic_err(
+                "Overflow error while calculating from_filled_amount.",
+            ));
+        }
+        Uint128::from((f.unwrap() / U256::from(creator_order.net_to_amount.u128())).as_u128())
+    };
     creator_order.from_amount_filled += from_filled_amount;
-    update_order(
+    update_creator_order_and_associated_contract_order(
         &mut deps.storage,
         &creator_order.creator,
         creator_order.clone(),
-    )?;
-    update_order(
-        &mut deps.storage,
         &contract_canonical_address,
-        contract_order.clone(),
     )?;
 
     // Send from token to admin
@@ -541,7 +515,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
             from_registered_token.address.clone(),
         )?,
         snip20::transfer_msg(
-            deps.api.human_address(&contract_order.creator)?,
+            deps.api.human_address(&creator_order.creator)?,
             amount,
             None,
             BLOCK_SIZE,
@@ -572,10 +546,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
         position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
-        order_position: contract_order.position,
+        order_position: creator_order.position,
         activity: 1,
-        result_from_amount_filled: Some(contract_order.from_amount_filled),
-        result_net_to_amount_filled: Some(contract_order.net_to_amount_filled),
+        result_from_amount_filled: Some(creator_order.from_amount_filled),
+        result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
@@ -1114,13 +1088,25 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn update_order<S: Storage>(store: &mut S, address: &CanonicalAddr, order: Order) -> StdResult<()> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
+fn update_creator_order_and_associated_contract_order<S: Storage>(
+    store: &mut S,
+    user_address: &CanonicalAddr,
+    creator_order: Order,
+    contract_address: &CanonicalAddr,
+) -> StdResult<()> {
+    let mut user_store =
+        PrefixedStorage::multilevel(&[PREFIX_ORDERS, user_address.as_slice()], store);
     // Try to access the storage of orders for the account.
     // If it doesn't exist yet, return an empty list of transfers.
-    let mut store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut store)?;
-    store.set_at(order.position, &order)?;
-
+    let mut user_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut user_store)?;
+    user_store.set_at(creator_order.position, &creator_order)?;
+    let mut contract_store =
+        PrefixedStorage::multilevel(&[PREFIX_ORDERS, contract_address.as_slice()], store);
+    let mut contract_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut contract_store)?;
+    let mut contract_order: Order = creator_order.clone();
+    contract_order.position = creator_order.other_storage_position;
+    contract_order.other_storage_position = creator_order.position;
+    contract_store.set_at(contract_order.position, &contract_order)?;
     Ok(())
 }
 
@@ -1260,17 +1246,21 @@ mod tests {
         // === when user has at least one order
         create_order_helper(&mut deps);
         // ==== when order has fee set already
-        let mut user_order = order_at_position(
+        let mut creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
             0,
         )
         .unwrap();
-        user_order.execution_fee = Some(Uint128(1));
-        update_order(
+        creator_order.execution_fee = Some(Uint128(1));
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            user_order.clone(),
+            creator_order.clone(),
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
         )
         .unwrap();
         // ==== * it raises an error
@@ -1287,12 +1277,16 @@ mod tests {
         );
         // ==== when order does not have execution fee set already
         // ===== when order is cancelled
-        user_order.execution_fee = None;
-        user_order.cancelled = true;
-        update_order(
+        creator_order.execution_fee = None;
+        creator_order.cancelled = true;
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            user_order.clone(),
+            creator_order.clone(),
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
         )
         .unwrap();
         // ===== * it raises an error
@@ -1302,12 +1296,16 @@ mod tests {
             StdError::generic_err("Order already cancelled.")
         );
         // ===== when order is filled
-        user_order.cancelled = false;
-        user_order.from_amount_filled = user_order.from_amount;
-        update_order(
+        creator_order.cancelled = false;
+        creator_order.from_amount_filled = creator_order.from_amount;
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            user_order.clone(),
+            creator_order.clone(),
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
         )
         .unwrap();
         // ===== * it raises an error
@@ -1317,22 +1315,26 @@ mod tests {
             StdError::generic_err("Order already filled.")
         );
         // ===== when order is open
-        user_order.from_amount_filled = Uint128(0);
-        update_order(
+        creator_order.from_amount_filled = Uint128(0);
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            user_order,
+            creator_order.clone(),
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
         )
         .unwrap();
         // ===== * it sets the execution fee for the user order
         handle(&mut deps, env.clone(), handle_msg).unwrap();
-        user_order = order_at_position(
+        creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
             0,
         )
         .unwrap();
-        assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+        assert_eq!(creator_order.execution_fee, Some(mock_execution_fee()));
         // ===== * it sets the execution fee for the contract order
         let contract_order = order_at_position(
             &mut deps.storage,
@@ -1340,7 +1342,7 @@ mod tests {
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            user_order.other_storage_position,
+            creator_order.other_storage_position,
         )
         .unwrap();
         assert_eq!(contract_order.execution_fee, Some(mock_execution_fee()));
@@ -1369,22 +1371,26 @@ mod tests {
             msg: Some(to_binary(&receive_msg).unwrap()),
         };
         // ==== when order is able to have execution_fee set
-        user_order.execution_fee = None;
-        update_order(
+        creator_order.execution_fee = None;
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            user_order,
+            creator_order.clone(),
+            &deps
+                .api
+                .canonical_address(&mock_contract().address)
+                .unwrap(),
         )
         .unwrap();
-        // ==== * it sets the execution fee for user_order
+        // ==== * it sets the execution fee for creator_order
         handle(&mut deps, env.clone(), handle_msg.clone()).unwrap();
-        user_order = order_at_position(
+        creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
             0,
         )
         .unwrap();
-        assert_eq!(user_order.execution_fee, Some(mock_execution_fee()));
+        assert_eq!(creator_order.execution_fee, Some(mock_execution_fee()));
         // ==== * it sets the execution fee for the contract order
         let contract_order = order_at_position(
             &mut deps.storage,
@@ -1392,10 +1398,10 @@ mod tests {
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            user_order.other_storage_position,
+            creator_order.other_storage_position,
         )
         .unwrap();
-        assert_eq!(contract_order.execution_fee, user_order.execution_fee);
+        assert_eq!(contract_order.execution_fee, creator_order.execution_fee);
     }
 
     #[test]
@@ -1472,20 +1478,14 @@ mod tests {
         )
         .unwrap();
         creator_order.cancelled = true;
-        contract_order.cancelled = true;
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
         // === * it raises an error
@@ -1496,22 +1496,16 @@ mod tests {
         );
         // === when order is filled
         creator_order.cancelled = false;
-        contract_order.cancelled = false;
         creator_order.from_amount_filled = creator_order.from_amount;
         contract_order.from_amount_filled = contract_order.from_amount;
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
         // === * it raises an error
@@ -1522,20 +1516,14 @@ mod tests {
         );
         // === when order can be cancelled
         creator_order.from_amount_filled = Uint128(1);
-        contract_order.from_amount_filled = Uint128(1);
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order,
         )
         .unwrap();
         // === * it sends the unfilled from token amount back to the creator
@@ -1567,7 +1555,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let mut contract_order = order_at_position(
+        let contract_order = order_at_position(
             &mut deps.storage,
             &deps
                 .api
@@ -1607,25 +1595,16 @@ mod tests {
         creator_order.execution_fee = Some(Uint128(1));
         creator_order.cancelled = false;
         creator_order.from_amount_filled = Uint128(1);
-        contract_order.execution_fee = Some(Uint128(1));
-        contract_order.cancelled = false;
-        contract_order.from_amount_filled = Uint128(1);
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
-
         // ===== when order is partially filled
         // ===== * it does not send the execution fee back to the creator
         let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
@@ -1646,24 +1625,17 @@ mod tests {
         creator_order.execution_fee = Some(Uint128(1));
         creator_order.cancelled = false;
         creator_order.from_amount_filled = Uint128(0);
-        contract_order.execution_fee = Some(Uint128(1));
-        contract_order.cancelled = false;
-        contract_order.from_amount_filled = Uint128(0);
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order,
         )
         .unwrap();
+
         // ===== * it sends the execution fee back to the creator
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
         assert_eq!(
@@ -1934,32 +1906,18 @@ mod tests {
             0,
         )
         .unwrap();
-        let mut contract_order = order_at_position(
-            &mut deps.storage,
-            &deps
-                .api
-                .canonical_address(&mock_contract().address)
-                .unwrap(),
-            creator_order.other_storage_position,
-        )
-        .unwrap();
         creator_order.cancelled = true;
-        contract_order.cancelled = true;
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
+
         // ==== * it raises an error
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
         assert_eq!(
@@ -1968,22 +1926,17 @@ mod tests {
         );
         // ==== when order is not cancelled
         creator_order.cancelled = false;
-        contract_order.cancelled = false;
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
-            &creator_order.creator.clone(),
+            &creator_order.creator,
             creator_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
+
         // ===== when amount sent in is greater than unfilled amount
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
@@ -2018,7 +1971,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let mut contract_order = order_at_position(
+        let contract_order = order_at_position(
             &mut deps.storage,
             &deps
                 .api
@@ -2134,24 +2087,19 @@ mod tests {
             _ => panic!("unexpected"),
         };
         // ====== when order has an execution fee
-        contract_order.execution_fee = Some(Uint128(1));
         creator_order.execution_fee = Some(Uint128(1));
         // ======= when order is partially filled
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
+            &creator_order.creator,
+            creator_order.clone(),
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
-        update_order(
-            &mut deps.storage,
-            &creator_order.creator.clone(),
-            creator_order.clone(),
-        )
-        .unwrap();
+
         // ====== * it does not send the execution fee
         let handle_msg = HandleMsg::Receive {
             sender: config.admin.clone(),
@@ -2186,25 +2134,17 @@ mod tests {
         );
 
         // ======= when order is completely unfilled
-        contract_order.from_amount_filled = Uint128(0);
         creator_order.from_amount_filled = Uint128(0);
-        contract_order.net_to_amount_filled = Uint128(0);
         creator_order.net_to_amount_filled = Uint128(0);
-        contract_order.execution_fee = Some(Uint128(1));
         creator_order.execution_fee = Some(Uint128(1));
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
+            &creator_order.creator,
+            creator_order.clone(),
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
-        )
-        .unwrap();
-        update_order(
-            &mut deps.storage,
-            &creator_order.creator.clone(),
-            creator_order.clone(),
         )
         .unwrap();
 
@@ -2254,7 +2194,7 @@ mod tests {
                 .unwrap(),
                 snip20::transfer_msg(
                     mock_contract().address,
-                    contract_order.execution_fee.unwrap(),
+                    creator_order.execution_fee.unwrap(),
                     None,
                     BLOCK_SIZE,
                     mock_sscrt().contract_hash,
@@ -2265,27 +2205,20 @@ mod tests {
         );
 
         // ======== when route state does not exist
-        contract_order.from_amount_filled = Uint128(0);
         creator_order.from_amount_filled = Uint128(0);
-        contract_order.net_to_amount_filled = Uint128(0);
         creator_order.net_to_amount_filled = Uint128(0);
-        contract_order.execution_fee = Some(Uint128(1));
         creator_order.execution_fee = Some(Uint128(1));
-        update_order(
+        update_creator_order_and_associated_contract_order(
             &mut deps.storage,
+            &creator_order.creator,
+            creator_order.clone(),
             &deps
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            contract_order.clone(),
         )
         .unwrap();
-        update_order(
-            &mut deps.storage,
-            &creator_order.creator.clone(),
-            creator_order.clone(),
-        )
-        .unwrap();
+
         delete_route_state(&mut deps.storage);
         // ======== * it sends the execution fee to the user calling the function
         let handle_result = handle(&mut deps, mock_env(mock_token().address, &[]), handle_msg);
@@ -2313,7 +2246,7 @@ mod tests {
                 .unwrap(),
                 snip20::transfer_msg(
                     config.admin,
-                    contract_order.execution_fee.unwrap(),
+                    creator_order.execution_fee.unwrap(),
                     None,
                     BLOCK_SIZE,
                     mock_sscrt().contract_hash,
