@@ -5,10 +5,41 @@
     {
       "type": "object",
       "required": [
-        "activity_records"
+        "cancel_records"
       ],
       "properties": {
-        "activity_records": {
+        "cancel_records": {
+          "type": "object",
+          "required": [
+            "key",
+            "page",
+            "page_size"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "page": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "fill_records"
+      ],
+      "properties": {
+        "fill_records": {
           "type": "object",
           "required": [
             "key",
