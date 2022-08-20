@@ -1,7 +1,7 @@
 use crate::authorize::authorize;
 use crate::constants::{
-    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS, PREFIX_CANCEL_RECORDS,
-    PREFIX_FILL_RECORDS, PREFIX_ORDERS,
+    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
+    PREFIX_CANCEL_RECORDS, PREFIX_FILL_RECORDS, PREFIX_ORDERS,
 };
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg, Snip20Swap};
 use crate::state::{
@@ -97,6 +97,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             page,
             page_size,
         } => orders(deps, address, key, page, page_size),
+        QueryMsg::OrdersByPositions {
+            address,
+            key,
+            positions,
+        } => orders_by_positions(deps, address, key, positions),
     }
 }
 
@@ -962,6 +967,36 @@ fn orders<S: Storage, A: Api, Q: Querier>(
     let result = QueryAnswer::Orders {
         orders,
         total: Some(total),
+    };
+    to_binary(&result)
+}
+
+fn orders_by_positions<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    key: String,
+    positions: Vec<u32>,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    query_balance_of_token(deps, address.clone(), config.butt, key.to_string())?;
+
+    let address = deps.api.canonical_address(&address)?;
+    let store =
+        ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], &deps.storage);
+    // Try to access the storage of orders for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store =
+        AppendStore::<Order, _, _>::attach(&store).ok_or_else(|| StdError::not_found("Orders"))?;
+    let store = store?;
+    let mut orders: Vec<HumanizedOrder> = vec![];
+    for position in positions.iter() {
+        let order = store.get_at(position.clone())?;
+        orders.push(order.into_humanized(&deps.api)?)
+    }
+
+    let result = QueryAnswer::Orders {
+        orders,
+        total: None,
     };
     to_binary(&result)
 }
@@ -2974,6 +3009,74 @@ mod tests {
             )
             .unwrap()]
         );
+    }
+
+    #[test]
+    fn test_orders_by_positions() {
+        let (_init_result, mut deps) = init_helper(true);
+
+        // when user's address and butt viewing key combo is correct
+        // = when user does not have any orders yet
+        // = * it raises an error
+        let mut res = query(
+            &deps,
+            QueryMsg::OrdersByPositions {
+                address: mock_user_address(),
+                key: MOCK_VIEWING_KEY.to_string(),
+                positions: vec![0],
+            },
+        );
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::NotFound {
+                kind: "Orders".to_string(),
+                backtrace: None
+            }
+        );
+
+        // = when user has orders
+        create_order_helper(&mut deps);
+        create_order_helper(&mut deps);
+        create_order_helper(&mut deps);
+        create_order_helper(&mut deps);
+        create_order_helper(&mut deps);
+        // == when position requested is unavailable
+        res = query(
+            &deps,
+            QueryMsg::OrdersByPositions {
+                address: mock_user_address(),
+                key: MOCK_VIEWING_KEY.to_string(),
+                positions: vec![1, 2, 3, 5],
+            },
+        );
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::GenericErr {
+                msg: "AppendStorage access out of bounds".to_string(),
+                backtrace: None
+            }
+        );
+        // == when position requested is available
+        res = query(
+            &deps,
+            QueryMsg::OrdersByPositions {
+                address: mock_user_address(),
+                key: MOCK_VIEWING_KEY.to_string(),
+                positions: vec![1, 3, 4],
+            },
+        );
+        // == * it returns the humanized orders at those positions
+        let query_answer: QueryAnswer = from_binary(&res.unwrap()).unwrap();
+        match query_answer {
+            QueryAnswer::Orders { orders, total } => {
+                assert_eq!(total, None);
+                assert_eq!(orders[0].creator, mock_user_address());
+                assert_eq!(orders[0].position, 1);
+                assert_eq!(orders[1].position, 3);
+                assert_eq!(orders[2].position, 4);
+            }
+            _ => panic!("unexpected"),
+        };
     }
 
     #[test]
