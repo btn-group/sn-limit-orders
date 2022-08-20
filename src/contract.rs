@@ -1,7 +1,7 @@
 use crate::authorize::authorize;
 use crate::constants::{
-    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
-    PREFIX_ACTIVITY_RECORDS, PREFIX_ORDERS,
+    BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS, PREFIX_CANCEL_RECORDS,
+    PREFIX_FILL_RECORDS, PREFIX_ORDERS,
 };
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg, Snip20Swap};
 use crate::state::{
@@ -77,11 +77,16 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
-        QueryMsg::ActivityRecords {
+        QueryMsg::CancelRecords {
             key,
             page,
             page_size,
-        } => activity_records(deps, key, page, page_size),
+        } => cancel_records(deps, key, page, page_size),
+        QueryMsg::FillRecords {
+            key,
+            page,
+            page_size,
+        } => fill_records(deps, key, page, page_size),
         QueryMsg::Config {} => {
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
@@ -132,7 +137,7 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     pad_response(response)
 }
 
-fn activity_records<S: Storage, A: Api, Q: Querier>(
+fn cancel_records<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     key: String,
     page: u32,
@@ -143,9 +148,28 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
     query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
 
     let address = deps.api.canonical_address(&config.admin)?;
-    let (activity_records, total) = get_activity_records(&deps.storage, &address, page, page_size)?;
-    let result = QueryAnswer::ActivityRecords {
-        activity_records,
+    let (cancel_records, total) = get_cancel_records(&deps.storage, &address, page, page_size)?;
+    let result = QueryAnswer::CancelRecords {
+        cancel_records,
+        total: Some(total),
+    };
+    to_binary(&result)
+}
+
+fn fill_records<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    key: String,
+    page: u32,
+    page_size: u32,
+) -> StdResult<Binary> {
+    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
+    // This is here to check the admin's viewing key
+    query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
+
+    let address = deps.api.canonical_address(&config.admin)?;
+    let (fill_records, total) = get_fill_records(&deps.storage, &address, page, page_size)?;
+    let result = QueryAnswer::FillRecords {
+        fill_records,
         total: Some(total),
     };
     to_binary(&result)
@@ -210,13 +234,24 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn append_activity_record<S: Storage>(
+fn append_cancel_record<S: Storage>(
     store: &mut S,
     activity_record: &ActivityRecord,
     for_address: &CanonicalAddr,
 ) -> StdResult<()> {
     let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()], store);
+        PrefixedStorage::multilevel(&[PREFIX_CANCEL_RECORDS, for_address.as_slice()], store);
+    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
+    store.push(activity_record)
+}
+
+fn append_fill_record<S: Storage>(
+    store: &mut S,
+    activity_record: &ActivityRecord,
+    for_address: &CanonicalAddr,
+) -> StdResult<()> {
+    let mut store =
+        PrefixedStorage::multilevel(&[PREFIX_FILL_RECORDS, for_address.as_slice()], store);
     let mut store = AppendStoreMut::attach_or_create(&mut store)?;
     store.push(activity_record)
 }
@@ -328,7 +363,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
+        position: get_next_cancel_record_position(&mut deps.storage, &admin_canonical_address)?,
         order_position: creator_order.other_storage_position,
         activity: 0,
         result_from_amount_filled: None,
@@ -336,7 +371,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
-    append_activity_record(
+    append_cancel_record(
         &mut deps.storage,
         &activity_record,
         &admin_canonical_address,
@@ -555,7 +590,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     // Create activity record
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_activity_record_position(&mut deps.storage, &admin_canonical_address)?,
+        position: get_next_fill_record_position(&mut deps.storage, &admin_canonical_address)?,
         order_position: creator_order.position,
         activity: 1,
         result_from_amount_filled: Some(creator_order.from_amount_filled),
@@ -563,7 +598,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
-    append_activity_record(
+    append_fill_record(
         &mut deps.storage,
         &activity_record,
         &admin_canonical_address,
@@ -602,14 +637,14 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn get_activity_records<S: ReadonlyStorage>(
+fn get_cancel_records<S: ReadonlyStorage>(
     storage: &S,
     for_address: &CanonicalAddr,
     page: u32,
     page_size: u32,
 ) -> StdResult<(Vec<ActivityRecord>, u64)> {
     let store = ReadonlyPrefixedStorage::multilevel(
-        &[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()],
+        &[PREFIX_CANCEL_RECORDS, for_address.as_slice()],
         storage,
     );
 
@@ -634,12 +669,54 @@ fn get_activity_records<S: ReadonlyStorage>(
     activity_records.map(|activity_records| (activity_records, store.len() as u64))
 }
 
-fn get_next_activity_record_position<S: Storage>(
+fn get_fill_records<S: ReadonlyStorage>(
+    storage: &S,
+    for_address: &CanonicalAddr,
+    page: u32,
+    page_size: u32,
+) -> StdResult<(Vec<ActivityRecord>, u64)> {
+    let store = ReadonlyPrefixedStorage::multilevel(
+        &[PREFIX_FILL_RECORDS, for_address.as_slice()],
+        storage,
+    );
+
+    // Try to access the storage of activity_records for the account.
+    // If it doesn't exist yet, return an empty list of transfers.
+    let store = AppendStore::<ActivityRecord, _, _>::attach(&store);
+    let store = if let Some(result) = store {
+        result?
+    } else {
+        return Ok((vec![], 0));
+    };
+
+    // Take `page_size` activity_records starting from the latest ActivityRecord, potentially skipping `page * page_size`
+    // activity_records from the start.
+    let activity_record_iter = store
+        .iter()
+        .rev()
+        .skip((page * page_size) as _)
+        .take(page_size as _);
+
+    let activity_records: StdResult<Vec<ActivityRecord>> = activity_record_iter.collect();
+    activity_records.map(|activity_records| (activity_records, store.len() as u64))
+}
+
+fn get_next_cancel_record_position<S: Storage>(
     store: &mut S,
     for_address: &CanonicalAddr,
 ) -> StdResult<u32> {
     let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_ACTIVITY_RECORDS, for_address.as_slice()], store);
+        PrefixedStorage::multilevel(&[PREFIX_CANCEL_RECORDS, for_address.as_slice()], store);
+    let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
+    Ok(store.len())
+}
+
+fn get_next_fill_record_position<S: Storage>(
+    store: &mut S,
+    for_address: &CanonicalAddr,
+) -> StdResult<u32> {
+    let mut store =
+        PrefixedStorage::multilevel(&[PREFIX_FILL_RECORDS, for_address.as_slice()], store);
     let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
     Ok(store.len())
 }
@@ -1585,7 +1662,7 @@ mod tests {
         assert_eq!(contract_order.cancelled, true);
 
         // ===== * it creates an activity record
-        let (activity_records, total) = get_activity_records(
+        let (activity_records, total) = get_cancel_records(
             &deps.storage,
             &deps
                 .api
@@ -2075,7 +2152,7 @@ mod tests {
         // ===== * it creates an activity record
         let res = query(
             &deps,
-            QueryMsg::ActivityRecords {
+            QueryMsg::FillRecords {
                 key: MOCK_VIEWING_KEY.to_string(),
                 page: 0,
                 page_size: 50,
@@ -2084,13 +2161,13 @@ mod tests {
         .unwrap();
         let query_answer: QueryAnswer = from_binary(&res).unwrap();
         match query_answer {
-            QueryAnswer::ActivityRecords {
-                activity_records,
+            QueryAnswer::FillRecords {
+                fill_records,
                 total,
             } => {
                 assert_eq!(total, Some(1));
                 assert_eq!(
-                    activity_records[0],
+                    fill_records[0],
                     ActivityRecord {
                         position: 0,
                         order_position: contract_order.position,
