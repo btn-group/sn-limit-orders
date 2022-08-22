@@ -341,7 +341,11 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_cancel_record_position(&mut deps.storage, &admin_canonical_address)?,
+        position: get_next_activity_record_position(
+            &mut deps.storage,
+            &admin_canonical_address,
+            PREFIX_CANCEL_RECORDS,
+        )?,
         order_position: creator_order.other_storage_position,
         activity: 0,
         result_from_amount_filled: None,
@@ -569,7 +573,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     // Create activity record
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_fill_record_position(&mut deps.storage, &admin_canonical_address)?,
+        position: get_next_activity_record_position(
+            &mut deps.storage,
+            &admin_canonical_address,
+            PREFIX_FILL_RECORDS,
+        )?,
         order_position: creator_order.position,
         activity: 1,
         result_from_amount_filled: Some(creator_order.from_amount_filled),
@@ -648,22 +656,12 @@ fn get_activity_records<S: ReadonlyStorage>(
     activity_records.map(|activity_records| (activity_records, store.len() as u64))
 }
 
-fn get_next_cancel_record_position<S: Storage>(
+fn get_next_activity_record_position<S: Storage>(
     store: &mut S,
     for_address: &CanonicalAddr,
+    storage_prefix: &[u8],
 ) -> StdResult<u32> {
-    let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_CANCEL_RECORDS, for_address.as_slice()], store);
-    let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
-    Ok(store.len())
-}
-
-fn get_next_fill_record_position<S: Storage>(
-    store: &mut S,
-    for_address: &CanonicalAddr,
-) -> StdResult<u32> {
-    let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_FILL_RECORDS, for_address.as_slice()], store);
+    let mut store = PrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], store);
     let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
     Ok(store.len())
 }
