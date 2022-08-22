@@ -186,7 +186,8 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     let order_position: u32 = if position.is_some() {
         position.unwrap()
     } else {
-        let next_position: u32 = get_next_position(&mut deps.storage, &user_canonical_address)?;
+        let next_position: u32 =
+            get_next_order_position(&mut deps.storage, &user_canonical_address)?;
         if next_position == 0 {
             return Err(StdError::generic_err("Order does not exist."));
         } else {
@@ -410,8 +411,8 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     // Store order
     let contract_address: CanonicalAddr = deps.api.canonical_address(&env.contract.address)?;
     let creator_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let contract_order_position = get_next_position(&mut deps.storage, &contract_address)?;
-    let creator_order_position = get_next_position(&mut deps.storage, &creator_address)?;
+    let contract_order_position = get_next_order_position(&mut deps.storage, &contract_address)?;
+    let creator_order_position = get_next_order_position(&mut deps.storage, &creator_address)?;
     let creator_order = Order {
         position: creator_order_position,
         execution_fee: None,
@@ -667,7 +668,10 @@ fn get_next_fill_record_position<S: Storage>(
     Ok(store.len())
 }
 
-fn get_next_position<S: Storage>(store: &mut S, for_address: &CanonicalAddr) -> StdResult<u32> {
+fn get_next_order_position<S: Storage>(
+    store: &mut S,
+    for_address: &CanonicalAddr,
+) -> StdResult<u32> {
     let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
     let store = AppendStoreMut::<Order, _>::attach_or_create(&mut store)?;
     Ok(store.len())
