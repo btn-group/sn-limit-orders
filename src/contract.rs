@@ -442,7 +442,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: None,
+        data: Some(to_binary(&creator_order.into_humanized(&deps.api)?)?),
     })
 }
 
@@ -1843,11 +1843,9 @@ mod tests {
             amount: Uint128(MOCK_AMOUNT),
             msg: Some(to_binary(&receive_msg).unwrap()),
         };
-        // == when user's butt_viewing_key isn't correct
-        // -- > Will have to test this live
 
-        // == when user's butt_viewing_key is correct
-        // == * it increases the sum_balance for the from_token
+        // == when order is created
+        // === * it increases the sum balance for the from_token
         assert_eq!(
             read_registered_token(
                 &deps.storage,
@@ -1857,7 +1855,7 @@ mod tests {
             .sum_balance,
             Uint128(0)
         );
-        handle(
+        let handle_unwrapped = handle(
             &mut deps,
             mock_env(mock_butt().address, &[]),
             handle_msg.clone(),
@@ -1872,9 +1870,7 @@ mod tests {
             .sum_balance,
             Uint128(MOCK_AMOUNT)
         );
-
-        // == * it stores the order for the creator
-        // == * it stores the order for the smart_contract
+        // === * it sends the humanized creator order back as data
         let order: Order = Order {
             position: 0,
             execution_fee: None,
@@ -1891,6 +1887,19 @@ mod tests {
             created_at_block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             created_at_block_height: mock_env(MOCK_ADMIN, &[]).block.height,
         };
+        assert_eq!(
+            handle_unwrapped.data,
+            pad_response(Ok(HandleResponse {
+                messages: vec![],
+                log: vec![],
+                data: Some(to_binary(&order.clone().into_humanized(&deps.api).unwrap()).unwrap()),
+            }))
+            .unwrap()
+            .data
+        );
+
+        // === * it stores the order for the creator
+        // === * it stores the order for the smart_contract
         assert_eq!(
             order_at_position(
                 &mut deps.storage,
