@@ -375,7 +375,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages,
         log: vec![],
-        data: None,
+        data: Some(to_binary(&creator_order.into_humanized(&deps.api)?)?),
     })
 }
 
@@ -1608,8 +1608,9 @@ mod tests {
         );
 
         // === * it sends the unfilled from token amount back to the creator
+        let handle_result_unwrapped = handle_result.unwrap();
         assert_eq!(
-            handle_result.unwrap().messages,
+            handle_result_unwrapped.messages,
             vec![snip20::transfer_msg(
                 deps.api.human_address(&creator_order.creator).unwrap(),
                 unfilled_amount,
@@ -1620,6 +1621,26 @@ mod tests {
             )
             .unwrap()]
         );
+        // === * it sends the creator order as humanized back as data
+        let creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            handle_result_unwrapped.data,
+            pad_response(Ok(HandleResponse {
+                messages: vec![],
+                log: vec![],
+                data: Some(
+                    to_binary(&creator_order.clone().into_humanized(&deps.api).unwrap()).unwrap()
+                ),
+            }))
+            .unwrap()
+            .data
+        );
+
         // === * it sets cancelled to true
         let mut creator_order = order_at_position(
             &mut deps.storage,
