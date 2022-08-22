@@ -44,12 +44,8 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
-    CancelRecords {
-        cancel_records: Vec<ActivityRecord>,
-        total: Option<u64>,
-    },
-    FillRecords {
-        fill_records: Vec<ActivityRecord>,
+    ActivityRecords {
+        activity_records: Vec<ActivityRecord>,
         total: Option<u64>,
     },
     Orders {

@@ -81,12 +81,12 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             key,
             page,
             page_size,
-        } => cancel_records(deps, key, page, page_size),
+        } => activity_records(deps, key, page, page_size, PREFIX_CANCEL_RECORDS),
         QueryMsg::FillRecords {
             key,
             page,
             page_size,
-        } => fill_records(deps, key, page, page_size),
+        } => activity_records(deps, key, page, page_size, PREFIX_FILL_RECORDS),
         QueryMsg::Config {} => {
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
@@ -142,39 +142,22 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     pad_response(response)
 }
 
-fn cancel_records<S: Storage, A: Api, Q: Querier>(
+fn activity_records<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     key: String,
     page: u32,
     page_size: u32,
+    storage_prefix: &[u8],
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     // This is here to check the admin's viewing key
     query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
 
     let address = deps.api.canonical_address(&config.admin)?;
-    let (cancel_records, total) = get_cancel_records(&deps.storage, &address, page, page_size)?;
-    let result = QueryAnswer::CancelRecords {
-        cancel_records,
-        total: Some(total),
-    };
-    to_binary(&result)
-}
-
-fn fill_records<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    key: String,
-    page: u32,
-    page_size: u32,
-) -> StdResult<Binary> {
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    // This is here to check the admin's viewing key
-    query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
-
-    let address = deps.api.canonical_address(&config.admin)?;
-    let (fill_records, total) = get_fill_records(&deps.storage, &address, page, page_size)?;
-    let result = QueryAnswer::FillRecords {
-        fill_records,
+    let (activity_records, total) =
+        get_activity_records(&deps.storage, &address, page, page_size, storage_prefix)?;
+    let result = QueryAnswer::ActivityRecords {
+        activity_records,
         total: Some(total),
     };
     to_binary(&result)
@@ -633,48 +616,15 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn get_cancel_records<S: ReadonlyStorage>(
+fn get_activity_records<S: ReadonlyStorage>(
     storage: &S,
     for_address: &CanonicalAddr,
     page: u32,
     page_size: u32,
+    storage_prefix: &[u8],
 ) -> StdResult<(Vec<ActivityRecord>, u64)> {
-    let store = ReadonlyPrefixedStorage::multilevel(
-        &[PREFIX_CANCEL_RECORDS, for_address.as_slice()],
-        storage,
-    );
-
-    // Try to access the storage of activity_records for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStore::<ActivityRecord, _, _>::attach(&store);
-    let store = if let Some(result) = store {
-        result?
-    } else {
-        return Ok((vec![], 0));
-    };
-
-    // Take `page_size` activity_records starting from the latest ActivityRecord, potentially skipping `page * page_size`
-    // activity_records from the start.
-    let activity_record_iter = store
-        .iter()
-        .rev()
-        .skip((page * page_size) as _)
-        .take(page_size as _);
-
-    let activity_records: StdResult<Vec<ActivityRecord>> = activity_record_iter.collect();
-    activity_records.map(|activity_records| (activity_records, store.len() as u64))
-}
-
-fn get_fill_records<S: ReadonlyStorage>(
-    storage: &S,
-    for_address: &CanonicalAddr,
-    page: u32,
-    page_size: u32,
-) -> StdResult<(Vec<ActivityRecord>, u64)> {
-    let store = ReadonlyPrefixedStorage::multilevel(
-        &[PREFIX_FILL_RECORDS, for_address.as_slice()],
-        storage,
-    );
+    let store =
+        ReadonlyPrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], storage);
 
     // Try to access the storage of activity_records for the account.
     // If it doesn't exist yet, return an empty list of transfers.
@@ -1688,7 +1638,7 @@ mod tests {
         assert_eq!(contract_order.cancelled, true);
 
         // ===== * it creates an activity record
-        let (activity_records, total) = get_cancel_records(
+        let (activity_records, total) = get_activity_records(
             &deps.storage,
             &deps
                 .api
@@ -1696,6 +1646,7 @@ mod tests {
                 .unwrap(),
             0,
             50,
+            PREFIX_CANCEL_RECORDS,
         )
         .unwrap();
         assert_eq!(total, 1);
@@ -2187,13 +2138,13 @@ mod tests {
         .unwrap();
         let query_answer: QueryAnswer = from_binary(&res).unwrap();
         match query_answer {
-            QueryAnswer::FillRecords {
-                fill_records,
+            QueryAnswer::ActivityRecords {
+                activity_records,
                 total,
             } => {
                 assert_eq!(total, Some(1));
                 assert_eq!(
-                    fill_records[0],
+                    activity_records[0],
                     ActivityRecord {
                         position: 0,
                         order_position: contract_order.position,
