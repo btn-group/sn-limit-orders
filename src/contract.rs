@@ -239,24 +239,13 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn append_cancel_record<S: Storage>(
+fn append_activity_record<S: Storage>(
     store: &mut S,
     activity_record: &ActivityRecord,
     for_address: &CanonicalAddr,
+    storage_prefix: &[u8],
 ) -> StdResult<()> {
-    let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_CANCEL_RECORDS, for_address.as_slice()], store);
-    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
-    store.push(activity_record)
-}
-
-fn append_fill_record<S: Storage>(
-    store: &mut S,
-    activity_record: &ActivityRecord,
-    for_address: &CanonicalAddr,
-) -> StdResult<()> {
-    let mut store =
-        PrefixedStorage::multilevel(&[PREFIX_FILL_RECORDS, for_address.as_slice()], store);
+    let mut store = PrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], store);
     let mut store = AppendStoreMut::attach_or_create(&mut store)?;
     store.push(activity_record)
 }
@@ -376,10 +365,11 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
-    append_cancel_record(
+    append_activity_record(
         &mut deps.storage,
         &activity_record,
         &admin_canonical_address,
+        PREFIX_CANCEL_RECORDS,
     )?;
 
     // If order has an execution fee and it has not been spent, send it back to the user
@@ -603,10 +593,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         updated_at_block_height: env.block.height,
         updated_at_block_time: env.block.time,
     };
-    append_fill_record(
+    append_activity_record(
         &mut deps.storage,
         &activity_record,
         &admin_canonical_address,
+        PREFIX_FILL_RECORDS,
     )?;
 
     Ok(HandleResponse {
