@@ -8,7 +8,7 @@ use crate::state::{
     write_registered_token, ActivityRecord, Config, Hop, HumanizedOrder, Order, RegisteredToken,
     RouteState, SecretContract,
 };
-use crate::validations::{validate_human_addr, validate_uint128};
+use crate::validations::{authorize, validate_human_addr, validate_uint128};
 use cosmwasm_std::{
     from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
     CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier, QueryRequest,
@@ -454,9 +454,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    if !config.addresses_allowed_to_fill.contains(&from) {
-        return Err(StdError::Unauthorized { backtrace: None });
-    }
+    authorize(config.addresses_allowed_to_fill, from.clone())?;
     if amount.is_zero() {
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
@@ -725,12 +723,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     // 2. send `amount` X to pair X/Y
     // 3. call FinalizeRoute to make sure everything went ok, otherwise revert the tx
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    if !config
-        .addresses_allowed_to_fill
-        .contains(&env.message.sender)
-    {
-        return Err(StdError::Unauthorized { backtrace: None });
-    }
+    authorize(config.addresses_allowed_to_fill, env.message.sender.clone())?;
     if hops.len() < 2 {
         return Err(StdError::generic_err("Route must be at least 2 hops."));
     }
