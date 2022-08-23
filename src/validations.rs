@@ -1,8 +1,16 @@
 use cosmwasm_std::{HumanAddr, StdError, StdResult, Uint128};
 
-pub fn authorize(expected: HumanAddr, received: HumanAddr) -> StdResult<()> {
+pub fn validate_human_addr(
+    expected: HumanAddr,
+    received: HumanAddr,
+    message: Option<&str>,
+) -> StdResult<()> {
     if expected != received {
-        return Err(StdError::Unauthorized { backtrace: None });
+        if message.is_some() {
+            return Err(StdError::generic_err(message.unwrap()));
+        } else {
+            return Err(StdError::Unauthorized { backtrace: None });
+        }
     }
 
     Ok(())
