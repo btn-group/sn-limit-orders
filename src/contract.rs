@@ -1,3 +1,4 @@
+use crate::authorize::{authorize, validate_uint128};
 use crate::constants::{
     BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
     PREFIX_CANCEL_RECORDS, PREFIX_FILL_RECORDS, PREFIX_ORDERS,
@@ -174,11 +175,11 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     if env.message.sender != config.sscrt.address {
         return Err(StdError::generic_err("Execution fee token must be SSCRT."));
     };
-    if config.execution_fee != amount {
-        return Err(StdError::generic_err(
-            "Amount sent in must equal execution fee.",
-        ));
-    };
+    validate_uint128(
+        config.execution_fee,
+        amount,
+        "Amount sent in must equal execution fee.",
+    )?;
 
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
@@ -280,9 +281,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     position: u32,
 ) -> StdResult<HandleResponse> {
-    if amount.u128() > 0 {
-        return Err(StdError::generic_err("Amount sent in must be zero."));
-    };
+    validate_uint128(Uint128(0), amount, "Amount sent in must be zero.")?;
 
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
