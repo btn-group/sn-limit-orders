@@ -115,8 +115,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     let response = if msg.is_some() {
         let msg: ReceiveMsg = from_binary(&msg.unwrap())?;
         match msg {
-            ReceiveMsg::SetExecutionFeeForOrder { position } => {
-                set_execution_fee_for_order(deps, &env, from, amount, position)
+            ReceiveMsg::SetExecutionFeeForOrder {} => {
+                set_execution_fee_for_order(deps, &env, from, amount)
             }
             ReceiveMsg::CancelOrder { position } => {
                 cancel_order(deps, &env, from, amount, position)
@@ -168,7 +168,6 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     from: HumanAddr,
     amount: Uint128,
-    position: Option<u32>,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     validate_human_addr(
@@ -185,19 +184,21 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
     let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let order_position: u32 = if position.is_some() {
-        position.unwrap()
+    let next_order_position: u32 =
+        get_next_order_position(&mut deps.storage, &user_canonical_address)?;
+    let order_position: u32 = if next_order_position == 0 {
+        return Err(StdError::generic_err("Order does not exist."));
     } else {
-        let next_position: u32 =
-            get_next_order_position(&mut deps.storage, &user_canonical_address)?;
-        if next_position == 0 {
-            return Err(StdError::generic_err("Order does not exist."));
-        } else {
-            next_position - 1
-        }
+        next_order_position - 1
     };
     let mut creator_order =
         order_at_position(&mut deps.storage, &user_canonical_address, order_position)?;
+    validate_uint128(
+        Uint128::from(creator_order.created_at_block_height),
+        Uint128::from(env.block.height),
+        "Execution fee must be set at the same block as when order is created.",
+    )?;
+
     if creator_order.execution_fee.is_some() {
         return Err(StdError::generic_err(
             "Execution fee already set for order.",
@@ -214,14 +215,14 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     update_creator_order_and_associated_contract_order(
         &mut deps.storage,
         &user_canonical_address,
-        creator_order,
+        creator_order.clone(),
         &contract_canonical_address,
     )?;
 
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: None,
+        data: Some(to_binary(&creator_order.into_humanized(&deps.api)?)?),
     })
 }
 
@@ -1271,7 +1272,7 @@ mod tests {
         let mut env = mock_env(mock_butt().address, &[]);
 
         // when token sent in is not sscrt
-        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: None };
+        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder {};
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
@@ -1302,15 +1303,15 @@ mod tests {
             msg: Some(to_binary(&receive_msg).unwrap()),
         };
         let handle_result = handle(&mut deps, env.clone(), handle_msg);
-        // == when position is not provided
-        // === when user does not have any orders
-        // ==== * it raises an error
+        // == when user does not have any orders
+        // === * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
             StdError::generic_err("Order does not exist.")
         );
-        // === when user has at least one order
+        // == when user has at least one order
         create_order_helper(&mut deps);
+        // === when current block is the same as the block when the order is created
         // ==== when order has fee set already
         let mut creator_order = order_at_position(
             &mut deps.storage,
@@ -1393,7 +1394,7 @@ mod tests {
         )
         .unwrap();
         // ===== * it sets the execution fee for the user order
-        handle(&mut deps, env.clone(), handle_msg).unwrap();
+        let handle_unwrapped = handle(&mut deps, env.clone(), handle_msg.clone()).unwrap();
         creator_order = order_at_position(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
@@ -1412,32 +1413,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(contract_order.execution_fee, Some(mock_execution_fee()));
-
-        // == when position is provided
-        // === when order at position doesn't exist
-        // === * it raises an error
-        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: Some(1) };
-        let handle_msg = HandleMsg::Receive {
-            sender: mock_user_address(),
-            from: mock_user_address(),
-            amount: mock_execution_fee(),
-            msg: Some(to_binary(&receive_msg).unwrap()),
-        };
-        let handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
+        // ===== * it sends the humanized creator order back as data
         assert_eq!(
-            handle_result.unwrap_err(),
-            StdError::generic_err("AppendStorage access out of bounds")
+            handle_unwrapped.data,
+            pad_response(Ok(HandleResponse {
+                messages: vec![],
+                log: vec![],
+                data: Some(
+                    to_binary(&creator_order.clone().into_humanized(&deps.api).unwrap()).unwrap()
+                ),
+            }))
+            .unwrap()
+            .data
         );
-        // === when order at position exists
-        let receive_msg = ReceiveMsg::SetExecutionFeeForOrder { position: Some(0) };
-        let handle_msg = HandleMsg::Receive {
-            sender: mock_user_address(),
-            from: mock_user_address(),
-            amount: mock_execution_fee(),
-            msg: Some(to_binary(&receive_msg).unwrap()),
-        };
-        // ==== when order is able to have execution_fee set
-        creator_order.execution_fee = None;
+
+        // === when current block is different from the block when the order is created
+        let mut creator_order = order_at_position(
+            &mut deps.storage,
+            &deps.api.canonical_address(&mock_user_address()).unwrap(),
+            0,
+        )
+        .unwrap();
+        creator_order.created_at_block_height = 1;
         update_creator_order_and_associated_contract_order(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_user_address()).unwrap(),
@@ -1448,26 +1445,14 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        // ==== * it sets the execution fee for creator_order
-        handle(&mut deps, env.clone(), handle_msg.clone()).unwrap();
-        creator_order = order_at_position(
-            &mut deps.storage,
-            &deps.api.canonical_address(&mock_user_address()).unwrap(),
-            0,
-        )
-        .unwrap();
-        assert_eq!(creator_order.execution_fee, Some(mock_execution_fee()));
-        // ==== * it sets the execution fee for the contract order
-        let contract_order = order_at_position(
-            &mut deps.storage,
-            &deps
-                .api
-                .canonical_address(&mock_contract().address)
-                .unwrap(),
-            creator_order.other_storage_position,
-        )
-        .unwrap();
-        assert_eq!(contract_order.execution_fee, creator_order.execution_fee);
+        // === * it raises an error
+        let handle_result = handle(&mut deps, env.clone(), handle_msg);
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err(
+                "Execution fee must be set at the same block as when order is created."
+            )
+        );
     }
 
     #[test]
