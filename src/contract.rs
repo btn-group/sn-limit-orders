@@ -1,4 +1,3 @@
-use crate::authorize::authorize;
 use crate::constants::{
     BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
     PREFIX_CANCEL_RECORDS, PREFIX_FILL_RECORDS, PREFIX_ORDERS,
@@ -9,6 +8,7 @@ use crate::state::{
     write_registered_token, ActivityRecord, Config, Hop, HumanizedOrder, Order, RegisteredToken,
     RouteState, SecretContract,
 };
+use crate::validations::authorize;
 use cosmwasm_std::{
     from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
     CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier, QueryRequest,
