@@ -11,14 +11,10 @@ pub fn authorize(allowed: Vec<HumanAddr>, received: HumanAddr) -> StdResult<()> 
 pub fn validate_human_addr(
     expected: HumanAddr,
     received: HumanAddr,
-    message: Option<&str>,
+    message: &str,
 ) -> StdResult<()> {
     if expected != received {
-        if message.is_some() {
-            return Err(StdError::generic_err(message.unwrap()));
-        } else {
-            return Err(StdError::Unauthorized { backtrace: None });
-        }
+        return Err(StdError::generic_err(message));
     }
 
     Ok(())
