@@ -1,4 +1,3 @@
-use crate::authorize::{authorize, validate_uint128};
 use crate::constants::{
     BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
     PREFIX_CANCEL_RECORDS, PREFIX_FILL_RECORDS, PREFIX_ORDERS,
@@ -9,7 +8,7 @@ use crate::state::{
     write_registered_token, ActivityRecord, Config, Hop, HumanizedOrder, Order, RegisteredToken,
     RouteState, SecretContract,
 };
-use crate::validations::authorize;
+use crate::validations::{validate_human_addr, validate_uint128};
 use cosmwasm_std::{
     from_binary, to_binary, Api, BalanceResponse, BankMsg, BankQuery, Binary, CanonicalAddr, Coin,
     CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, Querier, QueryRequest,
@@ -172,9 +171,11 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     position: Option<u32>,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    if env.message.sender != config.sscrt.address {
-        return Err(StdError::generic_err("Execution fee token must be SSCRT."));
-    };
+    validate_human_addr(
+        config.sscrt.address,
+        env.message.sender.clone(),
+        Some("Execution fee token must be SSCRT."),
+    )?;
     validate_uint128(
         config.execution_fee,
         amount,
@@ -290,11 +291,11 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         &deps.api.canonical_address(&from)?,
         position,
     )?;
-    if creator_order.from_token != env.message.sender {
-        return Err(StdError::generic_err(
-            "Token used to cancel does not match the from token of order.",
-        ));
-    }
+    validate_human_addr(
+        creator_order.from_token.clone(),
+        env.message.sender.clone(),
+        Some("Token used to cancel does not match the from token of order."),
+    )?;
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
     }
@@ -470,11 +471,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         contract_order.other_storage_position,
     )?;
     // Check the token is the same at the to_token
-    if creator_order.to_token != env.message.sender {
-        return Err(StdError::generic_err(
-            "To token does not match the token sent in.",
-        ));
-    }
+    validate_human_addr(
+        creator_order.to_token.clone(),
+        env.message.sender.clone(),
+        Some("To token does not match the token sent in."),
+    )?;
     // Check the amount + filled amount is less than or equal to amount
     if creator_order.cancelled {
         return Err(StdError::generic_err("Order already cancelled."));
@@ -611,7 +612,11 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
             // this function is called only by the route creation function
             // it is intended to always make sure that the route was completed successfully
             // otherwise we revert the transaction
-            authorize(env.contract.address.clone(), env.message.sender.clone())?;
+            validate_human_addr(
+                env.contract.address.clone(),
+                env.message.sender.clone(),
+                None,
+            )?;
             if remaining_hops.len() != 0 || current_hop.is_some() {
                 return Err(StdError::generic_err(format!(
                     "Cannot finalize: route still contains hops."
@@ -783,19 +788,22 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
             minimum_acceptable_amount,
             initiator,
         }) => {
-            if from != current_hop.unwrap().trade_smart_contract.address {
-                return Err(StdError::generic_err(
-                    "Route called from wrong trade smart contract.",
-                ));
-            }
+            validate_human_addr(
+                current_hop.unwrap().trade_smart_contract.address,
+                from,
+                Some("Route called from wrong trade smart contract."),
+            )?;
 
             let mut messages = vec![];
             let popped_hop: Option<Hop> = hops.pop_front();
             if popped_hop.is_some() {
                 let next_hop: Hop = popped_hop.clone().unwrap();
-                if env.message.sender != next_hop.from_token.address {
-                    return Err(StdError::generic_err("Route called by wrong token."));
-                }
+                validate_human_addr(
+                    next_hop.from_token.address.clone(),
+                    env.message.sender.clone(),
+                    Some("Route called by wrong token."),
+                )?;
+
                 // if the next hop is this contract
                 // check that the amount is less than or equal to that order's unfilled amount
                 // only send in the unfilled amount
@@ -822,9 +830,11 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     next_hop.from_token.address,
                 )?);
             } else {
-                if env.message.sender != borrow_token.address {
-                    return Err(StdError::generic_err("Route called by wrong token."));
-                }
+                validate_human_addr(
+                    borrow_token.address.clone(),
+                    env.message.sender.clone(),
+                    Some("Route called by wrong token."),
+                )?;
                 if amount.lt(&borrow_amount) {
                     return Err(StdError::generic_err(
                         "Operation fell short of borrow_amount.",
@@ -983,7 +993,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
     viewing_key: String,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(env.message.sender.clone(), config.admin)?;
+    validate_human_addr(env.message.sender.clone(), config.admin, None)?;
     let mut messages = vec![];
     for token in tokens {
         let token_address_canonical = deps.api.canonical_address(&token.address)?;
@@ -1028,7 +1038,7 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
     token_address: Option<HumanAddr>,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(env.message.sender.clone(), config.admin.clone())?;
+    validate_human_addr(env.message.sender.clone(), config.admin.clone(), None)?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
     if denom.is_some() {
@@ -1120,7 +1130,7 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let mut config: Config = config_store.load(CONFIG_KEY).unwrap();
-    authorize(env.message.sender.clone(), config.admin.clone())?;
+    validate_human_addr(env.message.sender.clone(), config.admin.clone(), None)?;
 
     if addresses_allowed_to_fill.is_some() {
         let new_addresses_allowed_to_fill = addresses_allowed_to_fill.unwrap();
