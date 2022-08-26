@@ -5,6 +5,31 @@
     {
       "type": "object",
       "required": [
+        "cancel_order"
+      ],
+      "properties": {
+        "cancel_order": {
+          "type": "object",
+          "required": [
+            "from_token_address",
+            "position"
+          ],
+          "properties": {
+            "from_token_address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "position": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
         "finalize_route"
       ],
       "properties": {

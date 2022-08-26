@@ -14,6 +14,10 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
+    CancelOrder {
+        from_token_address: HumanAddr,
+        position: u32,
+    },
     FinalizeRoute {},
     HandleFirstHop {
         borrow_amount: Uint128,
@@ -85,9 +89,6 @@ pub enum QueryMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
     SetExecutionFeeForOrder {},
-    CancelOrder {
-        position: u32,
-    },
     CreateOrder {
         butt_viewing_key: String,
         to_amount: Uint128,
