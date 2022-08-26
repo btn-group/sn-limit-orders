@@ -1,7 +1,7 @@
 use cosmwasm_std::{HumanAddr, StdError, StdResult, Uint128};
 
-pub fn authorize(allowed: Vec<HumanAddr>, received: HumanAddr) -> StdResult<()> {
-    if !allowed.contains(&received) {
+pub fn authorize(allowed: Vec<HumanAddr>, received: &HumanAddr) -> StdResult<()> {
+    if !allowed.contains(received) {
         return Err(StdError::Unauthorized { backtrace: None });
     }
 
