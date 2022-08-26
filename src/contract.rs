@@ -263,18 +263,13 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> StdResult<Ui
     } else {
         30
     };
-    if nom == 0 {
-        return Ok(Uint128(0));
-    }
+    let fee: u128 = if nom == 0 {
+        0
+    } else {
+        (U256::from(to_amount.u128()) * U256::from(nom) / U256::from(10_000)).as_u128()
+    };
 
-    let f = U256::from(to_amount.u128()).checked_mul(U256::from(nom));
-    if f.is_none() {
-        return Err(StdError::generic_err(
-            "Overflow error while calculating fee.",
-        ));
-    }
-
-    return Ok(Uint128::from((f.unwrap() / U256::from(10_000)).as_u128()));
+    return Ok(Uint128(fee));
 }
 
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
@@ -495,19 +490,16 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     }
     // Update net_to_amount_filled and from_amount_filled
     creator_order.net_to_amount_filled += amount;
-    let from_filled_amount: Uint128 = if creator_order.net_to_amount_filled
-        == creator_order.net_to_amount
-    {
-        (creator_order.from_amount - creator_order.from_amount_filled)?
-    } else {
-        let f = U256::from(creator_order.from_amount.u128()).checked_mul(U256::from(amount.u128()));
-        if f.is_none() {
-            return Err(StdError::generic_err(
-                "Overflow error while calculating from_filled_amount.",
-            ));
-        }
-        Uint128::from((f.unwrap() / U256::from(creator_order.net_to_amount.u128())).as_u128())
-    };
+    let from_filled_amount: Uint128 =
+        if creator_order.net_to_amount_filled == creator_order.net_to_amount {
+            (creator_order.from_amount - creator_order.from_amount_filled)?
+        } else {
+            Uint128::from(
+                (U256::from(creator_order.from_amount.u128()) * U256::from(amount.u128())
+                    / U256::from(creator_order.net_to_amount.u128()))
+                .as_u128(),
+            )
+        };
     creator_order.from_amount_filled += from_filled_amount;
     update_creator_order_and_associated_contract_order(
         &mut deps.storage,
