@@ -9,8 +9,8 @@ pub fn authorize(allowed: Vec<HumanAddr>, received: HumanAddr) -> StdResult<()> 
 }
 
 pub fn validate_human_addr(
-    expected: HumanAddr,
-    received: HumanAddr,
+    expected: &HumanAddr,
+    received: &HumanAddr,
     message: &str,
 ) -> StdResult<()> {
     if expected != received {
