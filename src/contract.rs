@@ -171,8 +171,8 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     validate_human_addr(
-        config.sscrt.address,
-        env.message.sender.clone(),
+        &config.sscrt.address,
+        &env.message.sender,
         "Execution fee token must be SSCRT.",
     )?;
     validate_uint128(
@@ -293,8 +293,8 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
         position,
     )?;
     validate_human_addr(
-        creator_order.from_token.clone(),
-        env.message.sender.clone(),
+        &creator_order.from_token,
+        &env.message.sender,
         "Token used to cancel does not match the from token of order.",
     )?;
     if creator_order.cancelled {
@@ -471,8 +471,8 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     )?;
     // Check the token is the same at the to_token
     validate_human_addr(
-        creator_order.to_token.clone(),
-        env.message.sender.clone(),
+        &creator_order.to_token,
+        &env.message.sender,
         "To token does not match the token sent in.",
     )?;
     // Check the amount + filled amount is less than or equal to amount
@@ -782,8 +782,8 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
             initiator,
         }) => {
             validate_human_addr(
-                current_hop.unwrap().trade_smart_contract.address,
-                from,
+                &current_hop.unwrap().trade_smart_contract.address,
+                &from,
                 "Route called from wrong trade smart contract.",
             )?;
 
@@ -792,8 +792,8 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
             if popped_hop.is_some() {
                 let next_hop: Hop = popped_hop.clone().unwrap();
                 validate_human_addr(
-                    next_hop.from_token.address.clone(),
-                    env.message.sender.clone(),
+                    &next_hop.from_token.address,
+                    &env.message.sender,
                     "Route called by wrong token.",
                 )?;
 
@@ -824,8 +824,8 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 )?);
             } else {
                 validate_human_addr(
-                    borrow_token.address.clone(),
-                    env.message.sender.clone(),
+                    &borrow_token.address,
+                    &env.message.sender,
                     "Route called by wrong token.",
                 )?;
                 if amount.lt(&borrow_amount) {
