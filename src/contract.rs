@@ -452,7 +452,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     position: u32,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(config.addresses_allowed_to_fill, from.clone())?;
+    authorize(config.addresses_allowed_to_fill, &from)?;
     if amount.is_zero() {
         return Err(StdError::generic_err("Amount must be greater than zero."));
     }
@@ -608,10 +608,7 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
             // this function is called only by the route creation function
             // it is intended to always make sure that the route was completed successfully
             // otherwise we revert the transaction
-            authorize(
-                vec![env.contract.address.clone()],
-                env.message.sender.clone(),
-            )?;
+            authorize(vec![env.contract.address.clone()], &env.message.sender)?;
             if remaining_hops.len() != 0 || current_hop.is_some() {
                 return Err(StdError::generic_err(format!(
                     "Cannot finalize: route still contains hops."
@@ -720,7 +717,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     // 2. send `amount` X to pair X/Y
     // 3. call FinalizeRoute to make sure everything went ok, otherwise revert the tx
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(config.addresses_allowed_to_fill, env.message.sender.clone())?;
+    authorize(config.addresses_allowed_to_fill, &env.message.sender)?;
     if hops.len() < 2 {
         return Err(StdError::generic_err("Route must be at least 2 hops."));
     }
@@ -983,7 +980,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
     viewing_key: String,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(vec![config.admin], env.message.sender.clone())?;
+    authorize(vec![config.admin], &env.message.sender)?;
     let mut messages = vec![];
     for token in tokens {
         let token_address_canonical = deps.api.canonical_address(&token.address)?;
@@ -1028,7 +1025,7 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
     token_address: Option<HumanAddr>,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    authorize(vec![config.admin.clone()], env.message.sender.clone())?;
+    authorize(vec![config.admin.clone()], &env.message.sender)?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
     if denom.is_some() {
@@ -1120,7 +1117,7 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let mut config_store = TypedStoreMut::attach(&mut deps.storage);
     let mut config: Config = config_store.load(CONFIG_KEY).unwrap();
-    authorize(vec![config.admin.clone()], env.message.sender.clone())?;
+    authorize(vec![config.admin.clone()], &env.message.sender)?;
 
     if addresses_allowed_to_fill.is_some() {
         let new_addresses_allowed_to_fill = addresses_allowed_to_fill.unwrap();
@@ -1220,7 +1217,7 @@ mod tests {
                 tokens: vec![mock_butt(), mock_token()],
                 viewing_key: MOCK_VIEWING_KEY.to_string(),
             };
-            handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg.clone()).unwrap();
+            handle(&mut deps, env, handle_msg.clone()).unwrap();
         }
         (init_result, deps)
     }
