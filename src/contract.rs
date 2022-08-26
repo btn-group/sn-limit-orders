@@ -151,7 +151,7 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     // This is here to check the admin's viewing key
-    query_balance_of_token(deps, config.admin.clone(), config.butt, key.to_string())?;
+    query_balance_of_token(deps, config.admin.clone(), config.butt, key)?;
 
     let address = deps.api.canonical_address(&config.admin)?;
     let (activity_records, total) =
@@ -923,7 +923,7 @@ fn orders_by_positions<S: Storage, A: Api, Q: Querier>(
     positions: Vec<u32>,
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-    query_balance_of_token(deps, address.clone(), config.butt, key.to_string())?;
+    query_balance_of_token(deps, address.clone(), config.butt, key)?;
 
     let address = deps.api.canonical_address(&address)?;
     let store =
