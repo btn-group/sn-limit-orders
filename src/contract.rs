@@ -1,6 +1,7 @@
 use crate::constants::{
     BLOCK_SIZE, CONFIG_KEY, MOCK_AMOUNT, MOCK_BUTT_ADDRESS, MOCK_TOKEN_ADDRESS,
-    PREFIX_CANCEL_RECORDS, PREFIX_FILL_RECORDS, PREFIX_ORDERS,
+    PREFIX_CANCEL_RECORDS, PREFIX_CANCEL_RECORDS_COUNT, PREFIX_FILL_RECORDS,
+    PREFIX_FILL_RECORDS_COUNT, PREFIX_ORDERS, PREFIX_ORDERS_COUNT,
 };
 use crate::msg::{HandleMsg, InitMsg, QueryAnswer, QueryMsg, ReceiveMsg, Snip20Swap};
 use crate::state::{
@@ -17,7 +18,7 @@ use cosmwasm_std::{
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use primitive_types::U256;
 use secret_toolkit::snip20;
-use secret_toolkit::storage::{AppendStore, AppendStoreMut, TypedStore, TypedStoreMut};
+use secret_toolkit::storage::{TypedStore, TypedStoreMut};
 use std::collections::VecDeque;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -50,7 +51,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::CancelOrder {
             from_token_address,
             position,
-        } => cancel_order(deps, &env, from_token_address, position),
+        } => cancel_order(deps, &env, from_token_address, position.u128()),
         HandleMsg::HandleFirstHop {
             borrow_amount,
             hops,
@@ -135,7 +136,9 @@ fn receive<S: Storage, A: Api, Q: Querier>(
                 to_amount,
                 to_token,
             ),
-            ReceiveMsg::FillOrder { position } => fill_order(deps, &env, from, amount, position),
+            ReceiveMsg::FillOrder { position } => {
+                fill_order(deps, &env, from, amount, position.u128())
+            }
         }
     } else {
         handle_hop(deps, &env, from, amount)
@@ -146,8 +149,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 fn activity_records<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     key: String,
-    page: u32,
-    page_size: u32,
+    page: u64,
+    page_size: u64,
     storage_prefix: &[u8],
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
@@ -162,6 +165,14 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
         total: Some(total),
     };
     to_binary(&result)
+}
+
+fn prefix_activity_records_count(activity_records_storage_prefix: &[u8]) -> &[u8] {
+    if activity_records_storage_prefix == PREFIX_CANCEL_RECORDS {
+        PREFIX_CANCEL_RECORDS_COUNT
+    } else {
+        PREFIX_FILL_RECORDS_COUNT
+    }
 }
 
 fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
@@ -185,9 +196,12 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
     let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let next_order_position: u32 =
-        get_next_order_position(&mut deps.storage, &user_canonical_address)?;
-    let order_position: u32 = if next_order_position == 0 {
+    let next_order_position: u128 = next_position(
+        &mut deps.storage,
+        &user_canonical_address,
+        PREFIX_ORDERS_COUNT,
+    )?;
+    let order_position: u128 = if next_order_position == 0 {
         return Err(StdError::generic_err("Order does not exist."));
     } else {
         next_order_position - 1
@@ -233,9 +247,30 @@ fn append_activity_record<S: Storage>(
     for_address: &CanonicalAddr,
     storage_prefix: &[u8],
 ) -> StdResult<()> {
-    let mut store = PrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], store);
-    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
-    store.push(activity_record)
+    let mut prefixed_store =
+        PrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], store);
+    let mut activity_record_store = TypedStoreMut::<ActivityRecord, _>::attach(&mut prefixed_store);
+    activity_record_store.store(
+        &activity_record.position.u128().to_le_bytes(),
+        activity_record,
+    )?;
+    set_count(
+        store,
+        for_address,
+        prefix_activity_records_count(storage_prefix),
+        activity_record.position.u128() + 1,
+    )
+}
+
+fn set_count<S: Storage>(
+    store: &mut S,
+    for_address: &CanonicalAddr,
+    storage_prefix: &[u8],
+    count: u128,
+) -> StdResult<()> {
+    let mut prefixed_store = PrefixedStorage::new(storage_prefix, store);
+    let mut count_store = TypedStoreMut::<u128, _>::attach(&mut prefixed_store);
+    count_store.store(for_address.as_slice(), &count)
 }
 
 fn append_order<S: Storage>(
@@ -243,9 +278,16 @@ fn append_order<S: Storage>(
     order: &Order,
     for_address: &CanonicalAddr,
 ) -> StdResult<()> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
-    let mut store = AppendStoreMut::attach_or_create(&mut store)?;
-    store.push(order)
+    let mut prefixed_store =
+        PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
+    let mut order_store = TypedStoreMut::<Order, _>::attach(&mut prefixed_store);
+    order_store.store(&order.position.u128().to_le_bytes(), order)?;
+    set_count(
+        store,
+        for_address,
+        PREFIX_ORDERS_COUNT,
+        order.position.u128() + 1,
+    )
 }
 
 fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> StdResult<Uint128> {
@@ -276,7 +318,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     from_token_address: HumanAddr,
-    position: u32,
+    position: u128,
 ) -> StdResult<HandleResponse> {
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
@@ -334,11 +376,11 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_activity_record_position(
+        position: Uint128(next_position(
             &mut deps.storage,
             &admin_canonical_address,
-            PREFIX_CANCEL_RECORDS,
-        )?,
+            PREFIX_CANCEL_RECORDS_COUNT,
+        )?),
         order_position: creator_order.other_storage_position,
         activity: 0,
         result_from_amount_filled: None,
@@ -408,12 +450,14 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     // Store order
     let contract_address: CanonicalAddr = deps.api.canonical_address(&env.contract.address)?;
     let creator_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let contract_order_position = get_next_order_position(&mut deps.storage, &contract_address)?;
-    let creator_order_position = get_next_order_position(&mut deps.storage, &creator_address)?;
+    let contract_order_position =
+        next_position(&mut deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
+    let creator_order_position =
+        next_position(&mut deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
     let creator_order = Order {
-        position: creator_order_position,
+        position: Uint128(creator_order_position),
         execution_fee: None,
-        other_storage_position: contract_order_position,
+        other_storage_position: Uint128(contract_order_position),
         from_token: env.message.sender.clone(),
         to_token: to_token,
         creator: creator_address.clone(),
@@ -427,8 +471,8 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         created_at_block_height: env.block.height,
     };
     let mut contract_order = creator_order.clone();
-    contract_order.position = contract_order_position;
-    contract_order.other_storage_position = creator_order_position;
+    contract_order.position = Uint128(contract_order_position);
+    contract_order.other_storage_position = Uint128(creator_order_position);
     append_order(&mut deps.storage, &contract_order, &contract_address)?;
     append_order(&mut deps.storage, &creator_order, &creator_address)?;
 
@@ -444,7 +488,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     from: HumanAddr,
     amount: Uint128,
-    position: u32,
+    position: u128,
 ) -> StdResult<HandleResponse> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     authorize(config.addresses_allowed_to_fill, &from)?;
@@ -459,7 +503,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     let mut creator_order = order_at_position(
         &mut deps.storage,
         &contract_order.creator,
-        contract_order.other_storage_position,
+        contract_order.other_storage_position.u128(),
     )?;
     // Check the token is the same at the to_token
     validate_human_addr(
@@ -561,11 +605,11 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     // Create activity record
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: get_next_activity_record_position(
+        position: Uint128(next_position(
             &mut deps.storage,
             &admin_canonical_address,
-            PREFIX_FILL_RECORDS,
-        )?,
+            PREFIX_FILL_RECORDS_COUNT,
+        )?),
         order_position: creator_order.position,
         activity: 1,
         result_from_amount_filled: Some(creator_order.from_amount_filled),
@@ -616,85 +660,81 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
 fn get_activity_records<S: ReadonlyStorage>(
     storage: &S,
     for_address: &CanonicalAddr,
-    page: u32,
-    page_size: u32,
+    page: u64,
+    page_size: u64,
     storage_prefix: &[u8],
-) -> StdResult<(Vec<ActivityRecord>, u64)> {
+) -> StdResult<(Vec<ActivityRecord>, Uint128)> {
+    let total: u128 = next_position(
+        storage,
+        for_address,
+        prefix_activity_records_count(storage_prefix),
+    )?;
+    if total == 0 {
+        return Ok((vec![], Uint128(0)));
+    }
+    let max_position: u128 = total - 1;
+    let option_highest_position: Option<u128> = max_position.checked_sub((page * page_size).into());
+    if option_highest_position.is_none() {
+        return Ok((vec![], Uint128(0)));
+    }
+    let highest_position: u128 = option_highest_position.unwrap();
+    let lowest_position: u128 = highest_position
+        .checked_sub((page_size - 1).into())
+        .unwrap_or(0);
     let store =
         ReadonlyPrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], storage);
+    let mut activity_records: Vec<ActivityRecord> = Vec::new();
+    let store = TypedStore::<ActivityRecord, _>::attach(&store);
+    for position in highest_position..=lowest_position {
+        activity_records.push(store.load(&position.to_le_bytes())?);
+    }
 
-    // Try to access the storage of activity_records for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStore::<ActivityRecord, _, _>::attach(&store);
-    let store = if let Some(result) = store {
-        result?
-    } else {
-        return Ok((vec![], 0));
-    };
-
-    // Take `page_size` activity_records starting from the latest ActivityRecord, potentially skipping `page * page_size`
-    // activity_records from the start.
-    let activity_record_iter = store
-        .iter()
-        .rev()
-        .skip((page * page_size) as _)
-        .take(page_size as _);
-
-    let activity_records: StdResult<Vec<ActivityRecord>> = activity_record_iter.collect();
-    activity_records.map(|activity_records| (activity_records, store.len() as u64))
-}
-
-fn get_next_activity_record_position<S: Storage>(
-    store: &mut S,
-    for_address: &CanonicalAddr,
-    storage_prefix: &[u8],
-) -> StdResult<u32> {
-    let mut store = PrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], store);
-    let store = AppendStoreMut::<ActivityRecord, _>::attach_or_create(&mut store)?;
-    Ok(store.len())
-}
-
-fn get_next_order_position<S: Storage>(
-    store: &mut S,
-    for_address: &CanonicalAddr,
-) -> StdResult<u32> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], store);
-    let store = AppendStoreMut::<Order, _>::attach_or_create(&mut store)?;
-    Ok(store.len())
+    Ok((activity_records, Uint128(total)))
 }
 
 fn get_orders<A: Api, S: ReadonlyStorage>(
     api: &A,
     storage: &S,
     for_address: &CanonicalAddr,
-    page: u32,
-    page_size: u32,
-) -> StdResult<(Vec<HumanizedOrder>, u64)> {
+    page: u64,
+    page_size: u64,
+) -> StdResult<(Vec<HumanizedOrder>, u128)> {
+    let total: u128 = next_position(storage, for_address, PREFIX_ORDERS_COUNT)?;
+    if total == 0 {
+        return Ok((vec![], 0));
+    }
+
+    let max_position: u128 = total - 1;
+    let option_highest_position: Option<u128> = max_position.checked_sub((page * page_size).into());
+    if option_highest_position.is_none() {
+        return Ok((vec![], 0));
+    }
+    let highest_position: u128 = option_highest_position.unwrap();
+    let lowest_position: u128 = highest_position
+        .checked_sub((page_size - 1).into())
+        .unwrap_or(0);
+
     let store =
         ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], storage);
+    let mut orders: Vec<HumanizedOrder> = Vec::new();
+    let store = TypedStore::<Order, _>::attach(&store);
+    for position in highest_position..=lowest_position {
+        orders.push(store.load(&position.to_le_bytes())?.into_humanized(api)?);
+    }
 
-    // Try to access the storage of orders for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStore::<Order, _, _>::attach(&store);
-    let store = if let Some(result) = store {
-        result?
-    } else {
-        return Ok((vec![], 0));
-    };
+    Ok((orders, total))
+}
 
-    // Take `page_size` orders starting from the latest Order, potentially skipping `page * page_size`
-    // orders from the start.
-    let order_iter = store
-        .iter()
-        .rev()
-        .skip((page * page_size) as _)
-        .take(page_size as _);
+fn next_position<S: ReadonlyStorage>(
+    store: &S,
+    for_address: &CanonicalAddr,
+    storage_prefix: &[u8],
+) -> StdResult<u128> {
+    let store = ReadonlyPrefixedStorage::new(storage_prefix, store);
+    let store = TypedStore::<u128, _>::attach(&store);
+    let position: Option<u128> = store.may_load(for_address.as_slice())?;
 
-    // The `and_then` here flattens the `StdResult<StdResult<RichOrder>>` to an `StdResult<RichOrder>`
-    let orders: StdResult<Vec<HumanizedOrder>> = order_iter
-        .map(|order| order.map(|order| order.into_humanized(api)).and_then(|x| x))
-        .collect();
-    orders.map(|orders| (orders, store.len() as u64))
+    Ok(position.unwrap_or(0))
 }
 
 fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
@@ -791,7 +831,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     let next_trade_order = order_at_position(
                         &mut deps.storage,
                         &deps.api.canonical_address(&env.contract.address)?,
-                        next_hop.position.unwrap(),
+                        next_hop.position.unwrap().u128(),
                     )?;
                     let unfilled_amount =
                         (next_trade_order.net_to_amount - next_trade_order.net_to_amount_filled)?;
@@ -861,43 +901,40 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
 }
 
 fn order_at_position<S: Storage>(
-    store: &mut S,
+    store: &S,
     address: &CanonicalAddr,
-    position: u32,
+    position: u128,
 ) -> StdResult<Order> {
-    let mut store = PrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
+    let store = ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], store);
     // Try to access the storage of orders for the account.
     // If it doesn't exist yet, return an empty list of transfers.
-    let store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut store)?;
+    let store = TypedStore::<Order, _>::attach(&store);
 
-    Ok(store.get_at(position)?)
+    Ok(store.load(&position.to_le_bytes())?)
 }
 
 fn orders<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
     key: String,
-    page: u32,
-    page_size: u32,
+    page: u64,
+    page_size: u64,
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
-
     // This is here so that the user can use their viewing key for butt for this
-    snip20::balance_query(
-        &deps.querier,
-        address.clone(),
-        key.to_string(),
-        BLOCK_SIZE,
-        config.butt.contract_hash,
-        config.butt.address,
-    )?;
+    query_balance_of_token(deps, address.clone(), config.butt, key)?;
 
-    let address = deps.api.canonical_address(&address)?;
-    let (orders, total) = get_orders(&deps.api, &deps.storage, &address, page, page_size)?;
+    let (orders, total) = get_orders(
+        &deps.api,
+        &deps.storage,
+        &deps.api.canonical_address(&address)?,
+        page,
+        page_size,
+    )?;
 
     let result = QueryAnswer::Orders {
         orders,
-        total: Some(total),
+        total: Some(Uint128(total)),
     };
     to_binary(&result)
 }
@@ -906,22 +943,15 @@ fn orders_by_positions<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
     key: String,
-    positions: Vec<u32>,
+    positions: Vec<Uint128>,
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     query_balance_of_token(deps, address.clone(), config.butt, key)?;
 
     let address = deps.api.canonical_address(&address)?;
-    let store =
-        ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, address.as_slice()], &deps.storage);
-    // Try to access the storage of orders for the account.
-    // If it doesn't exist yet, return an empty list of transfers.
-    let store =
-        AppendStore::<Order, _, _>::attach(&store).ok_or_else(|| StdError::not_found("Orders"))?;
-    let store = store?;
     let mut orders: Vec<HumanizedOrder> = vec![];
     for position in positions.iter() {
-        let order = store.get_at(position.clone())?;
+        let order = order_at_position(&deps.storage, &address, position.u128())?;
         orders.push(order.into_humanized(&deps.api)?)
     }
 
@@ -1151,15 +1181,18 @@ fn update_creator_order_and_associated_contract_order<S: Storage>(
         PrefixedStorage::multilevel(&[PREFIX_ORDERS, user_address.as_slice()], store);
     // Try to access the storage of orders for the account.
     // If it doesn't exist yet, return an empty list of transfers.
-    let mut user_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut user_store)?;
-    user_store.set_at(creator_order.position, &creator_order)?;
+    let mut user_store = TypedStoreMut::<Order, _, _>::attach(&mut user_store);
+    user_store.store(&creator_order.position.u128().to_le_bytes(), &creator_order)?;
     let mut contract_store =
         PrefixedStorage::multilevel(&[PREFIX_ORDERS, contract_address.as_slice()], store);
-    let mut contract_store = AppendStoreMut::<Order, _, _>::attach_or_create(&mut contract_store)?;
+    let mut contract_store = TypedStoreMut::<Order, _, _>::attach(&mut contract_store);
     let mut contract_order: Order = creator_order.clone();
     contract_order.position = creator_order.other_storage_position;
     contract_order.other_storage_position = creator_order.position;
-    contract_store.set_at(contract_order.position, &contract_order)?;
+    contract_store.store(
+        &contract_order.position.u128().to_le_bytes(),
+        &contract_order,
+    )?;
     Ok(())
 }
 
@@ -1169,6 +1202,7 @@ mod tests {
     use crate::state::SecretContract;
     use cosmwasm_std::from_binary;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
+    use cosmwasm_std::StdError::NotFound;
 
     pub const MOCK_ADMIN: &str = "admin";
     pub const MOCK_VIEWING_KEY: &str = "DELIGHTFUL";
@@ -1395,7 +1429,7 @@ mod tests {
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            creator_order.other_storage_position,
+            creator_order.other_storage_position.u128(),
         )
         .unwrap();
         assert_eq!(contract_order.execution_fee, Some(mock_execution_fee()));
@@ -1449,14 +1483,17 @@ mod tests {
         // = when order at position does not exist
         let mut handle_msg = HandleMsg::CancelOrder {
             from_token_address: mock_token().address,
-            position: 0,
+            position: Uint128(0),
         };
         let mut handle_result = handle(&mut deps, env.clone(), handle_msg.clone());
 
         // = * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err("AppendStorage access out of bounds")
+            NotFound {
+                kind: "cw_secret_network_limit_orders::state::Order".to_string(),
+                backtrace: None
+            }
         );
 
         // = when order at position exists
@@ -1471,7 +1508,7 @@ mod tests {
         // == when token used to cancel matches the from_token
         handle_msg = HandleMsg::CancelOrder {
             from_token_address: mock_butt().address,
-            position: 0,
+            position: Uint128(0),
         };
         // === when order is cancelled
         let mut creator_order = order_at_position(
@@ -1601,7 +1638,7 @@ mod tests {
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            creator_order.other_storage_position,
+            creator_order.other_storage_position.u128(),
         )
         .unwrap();
         assert_eq!(creator_order.cancelled, true);
@@ -1619,11 +1656,11 @@ mod tests {
             PREFIX_CANCEL_RECORDS,
         )
         .unwrap();
-        assert_eq!(total, 1);
+        assert_eq!(total, Uint128(1));
         assert_eq!(
             activity_records[0],
             ActivityRecord {
-                position: 0,
+                position: Uint128(0),
                 order_position: contract_order.position,
                 activity: 0,
                 result_from_amount_filled: None,
@@ -1840,9 +1877,9 @@ mod tests {
         );
         // === * it sends the humanized creator order back as data
         let order: Order = Order {
-            position: 0,
+            position: Uint128(0),
             execution_fee: None,
-            other_storage_position: 0,
+            other_storage_position: Uint128(0),
             from_token: mock_butt().address,
             to_token: mock_token().address,
             creator: deps.api.canonical_address(&mock_user_address()).unwrap(),
@@ -1897,7 +1934,9 @@ mod tests {
         let env = mock_env(mock_butt().address, &[]);
 
         // when called by a non-admin
-        let receive_msg = ReceiveMsg::FillOrder { position: 0 };
+        let receive_msg = ReceiveMsg::FillOrder {
+            position: Uint128(0),
+        };
         let handle_msg = HandleMsg::Receive {
             sender: mock_user_address(),
             from: mock_user_address(),
@@ -1938,7 +1977,10 @@ mod tests {
         // == * it raises an error
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err("AppendStorage access out of bounds")
+            NotFound {
+                kind: "cw_secret_network_limit_orders::state::Order".to_string(),
+                backtrace: None
+            }
         );
         // == when order exists
         create_order_helper(&mut deps);
@@ -2028,7 +2070,7 @@ mod tests {
                 .api
                 .canonical_address(&mock_contract().address)
                 .unwrap(),
-            creator_order.other_storage_position,
+            creator_order.other_storage_position.u128(),
         )
         .unwrap();
         assert_eq!(
@@ -2121,11 +2163,11 @@ mod tests {
                 activity_records,
                 total,
             } => {
-                assert_eq!(total, Some(1));
+                assert_eq!(total, Some(Uint128(1)));
                 assert_eq!(
                     activity_records[0],
                     ActivityRecord {
-                        position: 0,
+                        position: Uint128(0),
                         order_position: contract_order.position,
                         activity: 1,
                         result_from_amount_filled: Some(creator_order.from_amount_filled),
@@ -2328,13 +2370,13 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_token(),
             trade_smart_contract: mock_contract(),
-            position: Some(2),
+            position: Some(Uint128(2)),
         });
         let route_state: RouteState = RouteState {
             current_hop: Some(Hop {
                 from_token: mock_token(),
                 trade_smart_contract: mock_contract(),
-                position: Some(1),
+                position: Some(Uint128(1)),
             }),
             remaining_hops: hops,
             borrow_token: mock_token(),
@@ -2368,7 +2410,7 @@ mod tests {
             current_hop: Some(Hop {
                 from_token: mock_token(),
                 trade_smart_contract: mock_contract(),
-                position: Some(1),
+                position: Some(Uint128(1)),
             }),
             remaining_hops: hops,
             borrow_token: mock_token(),
@@ -2418,7 +2460,7 @@ mod tests {
         let first_hop = Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(0),
+            position: Some(Uint128(0)),
         };
         hops.push_back(first_hop.clone());
         let handle_msg = HandleMsg::HandleFirstHop {
@@ -2453,7 +2495,7 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(1),
+            position: Some(Uint128(1)),
         });
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
@@ -2518,7 +2560,7 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(1),
+            position: Some(Uint128(1)),
         });
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
@@ -2594,13 +2636,13 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_token(),
             trade_smart_contract: mock_contract(),
-            position: Some(1),
+            position: Some(Uint128(1)),
         });
         let route_state: RouteState = RouteState {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops,
             borrow_token: borrow_token.clone(),
@@ -2661,7 +2703,7 @@ mod tests {
                 current_hop: Some(Hop {
                     from_token: mock_token(),
                     trade_smart_contract: mock_contract(),
-                    position: Some(1),
+                    position: Some(Uint128(1)),
                 }),
                 borrow_token: borrow_token.clone(),
                 remaining_hops: VecDeque::new(),
@@ -2679,7 +2721,12 @@ mod tests {
             vec![snip20::send_msg(
                 mock_contract().address,
                 Uint128(MOCK_AMOUNT),
-                Some(to_binary(&ReceiveMsg::FillOrder { position: 1 }).unwrap()),
+                Some(
+                    to_binary(&ReceiveMsg::FillOrder {
+                        position: Uint128(1)
+                    })
+                    .unwrap()
+                ),
                 None,
                 BLOCK_SIZE,
                 mock_token().contract_hash,
@@ -2693,13 +2740,13 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_token(),
             trade_smart_contract: mock_contract(),
-            position: Some(1),
+            position: Some(Uint128(1)),
         });
         let route_state: RouteState = RouteState {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops,
             borrow_token: borrow_token.clone(),
@@ -2726,7 +2773,12 @@ mod tests {
             vec![snip20::send_msg(
                 mock_contract().address,
                 Uint128(MOCK_AMOUNT),
-                Some(to_binary(&ReceiveMsg::FillOrder { position: 1 }).unwrap()),
+                Some(
+                    to_binary(&ReceiveMsg::FillOrder {
+                        position: Uint128(1)
+                    })
+                    .unwrap()
+                ),
                 None,
                 BLOCK_SIZE,
                 mock_token().contract_hash,
@@ -2746,7 +2798,7 @@ mod tests {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops,
             borrow_token: borrow_token.clone(),
@@ -2793,7 +2845,7 @@ mod tests {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops.clone(),
             borrow_token: borrow_token.clone(),
@@ -2855,7 +2907,7 @@ mod tests {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops.clone(),
             borrow_token: borrow_token.clone(),
@@ -2897,7 +2949,7 @@ mod tests {
             current_hop: Some(Hop {
                 from_token: mock_butt(),
                 trade_smart_contract: mock_contract(),
-                position: Some(2),
+                position: Some(Uint128(2)),
             }),
             remaining_hops: hops.clone(),
             borrow_token: borrow_token.clone(),
@@ -2944,13 +2996,13 @@ mod tests {
             QueryMsg::OrdersByPositions {
                 address: mock_user_address(),
                 key: MOCK_VIEWING_KEY.to_string(),
-                positions: vec![0],
+                positions: vec![Uint128(0)],
             },
         );
         assert_eq!(
             res.unwrap_err(),
-            StdError::NotFound {
-                kind: "Orders".to_string(),
+            NotFound {
+                kind: "cw_secret_network_limit_orders::state::Order".to_string(),
                 backtrace: None
             }
         );
@@ -2967,13 +3019,13 @@ mod tests {
             QueryMsg::OrdersByPositions {
                 address: mock_user_address(),
                 key: MOCK_VIEWING_KEY.to_string(),
-                positions: vec![1, 2, 3, 5],
+                positions: vec![Uint128(1), Uint128(2), Uint128(3), Uint128(5)],
             },
         );
         assert_eq!(
             res.unwrap_err(),
-            StdError::GenericErr {
-                msg: "AppendStorage access out of bounds".to_string(),
+            NotFound {
+                kind: "cw_secret_network_limit_orders::state::Order".to_string(),
                 backtrace: None
             }
         );
@@ -2983,7 +3035,7 @@ mod tests {
             QueryMsg::OrdersByPositions {
                 address: mock_user_address(),
                 key: MOCK_VIEWING_KEY.to_string(),
-                positions: vec![1, 3, 4],
+                positions: vec![Uint128(1), Uint128(3), Uint128(4)],
             },
         );
         // == * it returns the humanized orders at those positions
@@ -2992,9 +3044,9 @@ mod tests {
             QueryAnswer::Orders { orders, total } => {
                 assert_eq!(total, None);
                 assert_eq!(orders[0].creator, mock_user_address());
-                assert_eq!(orders[0].position, 1);
-                assert_eq!(orders[1].position, 3);
-                assert_eq!(orders[2].position, 4);
+                assert_eq!(orders[0].position, Uint128(1));
+                assert_eq!(orders[1].position, Uint128(3));
+                assert_eq!(orders[2].position, Uint128(4));
             }
             _ => panic!("unexpected"),
         };

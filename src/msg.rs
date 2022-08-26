@@ -16,7 +16,7 @@ pub struct InitMsg {
 pub enum HandleMsg {
     CancelOrder {
         from_token_address: HumanAddr,
-        position: u32,
+        position: Uint128,
     },
     FinalizeRoute {},
     HandleFirstHop {
@@ -50,11 +50,11 @@ pub enum HandleMsg {
 pub enum QueryAnswer {
     ActivityRecords {
         activity_records: Vec<ActivityRecord>,
-        total: Option<u64>,
+        total: Option<Uint128>,
     },
     Orders {
         orders: Vec<HumanizedOrder>,
-        total: Option<u64>,
+        total: Option<Uint128>,
     },
 }
 
@@ -63,25 +63,25 @@ pub enum QueryAnswer {
 pub enum QueryMsg {
     CancelRecords {
         key: String,
-        page: u32,
-        page_size: u32,
+        page: u64,
+        page_size: u64,
     },
     FillRecords {
         key: String,
-        page: u32,
-        page_size: u32,
+        page: u64,
+        page_size: u64,
     },
     Config {},
     Orders {
         address: HumanAddr,
         key: String,
-        page: u32,
-        page_size: u32,
+        page: u64,
+        page_size: u64,
     },
     OrdersByPositions {
         address: HumanAddr,
         key: String,
-        positions: Vec<u32>,
+        positions: Vec<Uint128>,
     },
 }
 
@@ -95,7 +95,7 @@ pub enum ReceiveMsg {
         to_token: HumanAddr,
     },
     FillOrder {
-        position: u32,
+        position: Uint128,
     },
 }
 

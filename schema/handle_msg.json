@@ -19,9 +19,7 @@
               "$ref": "#/definitions/HumanAddr"
             },
             "position": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0.0
+              "$ref": "#/definitions/Uint128"
             }
           }
         }
@@ -221,12 +219,14 @@
           "$ref": "#/definitions/SecretContract"
         },
         "position": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0.0
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "trade_smart_contract": {
           "$ref": "#/definitions/SecretContract"
