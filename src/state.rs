@@ -10,8 +10,8 @@ use std::collections::VecDeque;
 // activity (0 => cancelled, 1 => filled)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone, JsonSchema)]
 pub struct ActivityRecord {
-    pub order_position: u32,
-    pub position: u32,
+    pub order_position: Uint128,
+    pub position: Uint128,
     pub activity: u8,
     pub result_from_amount_filled: Option<Uint128>,
     pub result_net_to_amount_filled: Option<Uint128>,
@@ -68,7 +68,7 @@ pub fn write_registered_token<S: Storage>(
 pub struct HumanizedOrder {
     pub creator: HumanAddr,
     pub execution_fee: Option<Uint128>,
-    pub position: u32,
+    pub position: Uint128,
     pub from_token: HumanAddr,
     pub to_token: HumanAddr,
     pub from_amount: Uint128,
@@ -85,8 +85,8 @@ pub struct HumanizedOrder {
 pub struct Order {
     pub creator: CanonicalAddr,
     pub execution_fee: Option<Uint128>,
-    pub position: u32,
-    pub other_storage_position: u32,
+    pub position: Uint128,
+    pub other_storage_position: Uint128,
     pub from_token: HumanAddr,
     pub to_token: HumanAddr,
     pub from_amount: Uint128,
@@ -123,7 +123,7 @@ impl Order {
 pub struct Hop {
     pub from_token: SecretContract,
     pub trade_smart_contract: SecretContract,
-    pub position: Option<u32>,
+    pub position: Option<Uint128>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -21,12 +21,12 @@
             },
             "page": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             },
             "page_size": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             }
           }
@@ -52,12 +52,12 @@
             },
             "page": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             },
             "page_size": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             }
           }
@@ -98,12 +98,12 @@
             },
             "page": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             },
             "page_size": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0.0
             }
           }
@@ -133,9 +133,7 @@
             "positions": {
               "type": "array",
               "items": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0.0
+                "$ref": "#/definitions/Uint128"
               }
             }
           }
@@ -145,6 +143,9 @@
   ],
   "definitions": {
     "HumanAddr": {
+      "type": "string"
+    },
+    "Uint128": {
       "type": "string"
     }
   }
