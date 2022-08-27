@@ -196,7 +196,7 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
     let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let next_order_position: u128 = next_position(
+    let next_order_position: u128 = storage_count(
         &mut deps.storage,
         &user_canonical_address,
         PREFIX_ORDERS_COUNT,
@@ -376,7 +376,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: Uint128(next_position(
+        position: Uint128(storage_count(
             &mut deps.storage,
             &admin_canonical_address,
             PREFIX_CANCEL_RECORDS_COUNT,
@@ -451,9 +451,9 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let contract_address: CanonicalAddr = deps.api.canonical_address(&env.contract.address)?;
     let creator_address: CanonicalAddr = deps.api.canonical_address(&from)?;
     let contract_order_position =
-        next_position(&mut deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
+        storage_count(&mut deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
     let creator_order_position =
-        next_position(&mut deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
+        storage_count(&mut deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
     let creator_order = Order {
         position: Uint128(creator_order_position),
         execution_fee: None,
@@ -605,7 +605,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     // Create activity record
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
-        position: Uint128(next_position(
+        position: Uint128(storage_count(
             &mut deps.storage,
             &admin_canonical_address,
             PREFIX_FILL_RECORDS_COUNT,
@@ -664,7 +664,7 @@ fn get_activity_records<S: ReadonlyStorage>(
     page_size: u64,
     storage_prefix: &[u8],
 ) -> StdResult<(Vec<ActivityRecord>, Uint128)> {
-    let total: u128 = next_position(
+    let total: u128 = storage_count(
         storage,
         for_address,
         prefix_activity_records_count(storage_prefix),
@@ -699,7 +699,7 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     page: u64,
     page_size: u64,
 ) -> StdResult<(Vec<HumanizedOrder>, u128)> {
-    let total: u128 = next_position(storage, for_address, PREFIX_ORDERS_COUNT)?;
+    let total: u128 = storage_count(storage, for_address, PREFIX_ORDERS_COUNT)?;
     if total == 0 {
         return Ok((vec![], 0));
     }
@@ -725,7 +725,7 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     Ok((orders, total))
 }
 
-fn next_position<S: ReadonlyStorage>(
+fn storage_count<S: ReadonlyStorage>(
     store: &S,
     for_address: &CanonicalAddr,
     storage_prefix: &[u8],
