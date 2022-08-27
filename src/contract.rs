@@ -910,7 +910,7 @@ fn order_at_position<S: Storage>(
     // If it doesn't exist yet, return an empty list of transfers.
     let store = TypedStore::<Order, _>::attach(&store);
 
-    Ok(store.load(&position.to_le_bytes())?)
+    store.load(&position.to_le_bytes())
 }
 
 fn orders<S: Storage, A: Api, Q: Querier>(
