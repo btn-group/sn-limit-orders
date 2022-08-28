@@ -129,8 +129,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     msg: Option<Binary>,
 ) -> StdResult<HandleResponse> {
-    let response = if msg.is_some() {
-        let msg: ReceiveMsg = from_binary(&msg.unwrap())?;
+    let response = if let Some(msg_unwrapped) = msg {
+        let msg: ReceiveMsg = from_binary(&msg_unwrapped)?;
         match msg {
             ReceiveMsg::SetExecutionFeeForOrder {} => {
                 set_execution_fee_for_order(deps, &env, from, amount)
@@ -408,15 +408,17 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     )?;
 
     // If order has an execution fee and it has not been spent, send it back to the user
-    if creator_order.execution_fee.is_some() && creator_order.from_amount_filled.is_zero() {
-        messages.push(snip20::transfer_msg(
-            env.message.sender.clone(),
-            creator_order.execution_fee.unwrap(),
-            None,
-            BLOCK_SIZE,
-            config.sscrt.contract_hash,
-            config.sscrt.address,
-        )?);
+    if creator_order.from_amount_filled.is_zero() {
+        if let Some(execution_fee_unwrapped) = creator_order.execution_fee {
+            messages.push(snip20::transfer_msg(
+                env.message.sender.clone(),
+                execution_fee_unwrapped,
+                None,
+                BLOCK_SIZE,
+                config.sscrt.contract_hash,
+                config.sscrt.address,
+            )?);
+        }
     }
 
     pad_response(Ok(HandleResponse {
@@ -596,9 +598,9 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
             to_registered_token.address,
         )?,
     ];
-    if address_to_send_execution_fee_to.is_some() {
+    if let Some(address_to_send_execution_fee_to_unwrapped) = address_to_send_execution_fee_to {
         messages.push(snip20::transfer_msg(
-            address_to_send_execution_fee_to.unwrap(),
+            address_to_send_execution_fee_to_unwrapped,
             creator_order.execution_fee.unwrap(),
             None,
             BLOCK_SIZE,
@@ -828,8 +830,8 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
 
             let mut messages = vec![];
             let popped_hop: Option<Hop> = hops.pop_front();
-            if popped_hop.is_some() {
-                let next_hop: Hop = popped_hop.clone().unwrap();
+            if let Some(popped_hop_unwrapped) = popped_hop.clone() {
+                let next_hop: Hop = popped_hop_unwrapped;
                 validate_human_addr(
                     &next_hop.from_token.address,
                     &env.message.sender,
@@ -872,13 +874,14 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                         "Operation fell short of borrow_amount.",
                     ));
                 }
-                if minimum_acceptable_amount.is_some()
-                    && amount.lt(&minimum_acceptable_amount.unwrap())
-                {
-                    return Err(StdError::generic_err(
-                        "Operation fell short of minimum_acceptable_amount.",
-                    ));
+                if let Some(minimum_acceptable_amount_unwrapped) = minimum_acceptable_amount {
+                    if amount.lt(&minimum_acceptable_amount_unwrapped) {
+                        return Err(StdError::generic_err(
+                            "Operation fell short of minimum_acceptable_amount.",
+                        ));
+                    }
                 }
+
                 // Send fee to initiator
                 if amount.gt(&borrow_amount) {
                     messages.push(snip20::transfer_msg(
@@ -1063,11 +1066,11 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
     authorize(vec![config.admin.clone()], &env.message.sender)?;
 
     let mut messages: Vec<CosmosMsg> = vec![];
-    if denom.is_some() {
+    if let Some(denom_unwrapped) = denom {
         let balance_response: BalanceResponse =
             deps.querier.query(&QueryRequest::Bank(BankQuery::Balance {
                 address: env.contract.address.clone(),
-                denom: denom.unwrap(),
+                denom: denom_unwrapped,
             }))?;
 
         let withdrawal_coins: Vec<Coin> = vec![balance_response.amount];
@@ -1078,32 +1081,34 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
         }));
     }
 
-    if token_address.is_some() && key.is_some() {
-        let key: String = key.unwrap();
-        let token_address: HumanAddr = token_address.unwrap();
-        let registered_token: RegisteredToken =
-            read_registered_token(&deps.storage, &deps.api.canonical_address(&token_address)?)
-                .unwrap();
-        let balance: Uint128 = query_balance_of_token(
-            deps,
-            env.contract.address.clone(),
-            SecretContract {
-                address: token_address,
-                contract_hash: registered_token.contract_hash.clone(),
-            },
-            key.to_string(),
-        )?;
-        let sum_balance: Uint128 = registered_token.sum_balance;
-        let difference: Uint128 = (balance - sum_balance)?;
-        if !difference.is_zero() {
-            messages.push(snip20::transfer_msg(
-                config.admin,
-                difference,
-                None,
-                BLOCK_SIZE,
-                registered_token.contract_hash,
-                registered_token.address,
-            )?)
+    if let Some(token_address_unwrapped) = token_address {
+        if let Some(key_unwrapped) = key {
+            let registered_token: RegisteredToken = read_registered_token(
+                &deps.storage,
+                &deps.api.canonical_address(&token_address_unwrapped)?,
+            )
+            .unwrap();
+            let balance: Uint128 = query_balance_of_token(
+                deps,
+                env.contract.address.clone(),
+                SecretContract {
+                    address: token_address_unwrapped,
+                    contract_hash: registered_token.contract_hash.clone(),
+                },
+                key_unwrapped.to_string(),
+            )?;
+            let sum_balance: Uint128 = registered_token.sum_balance;
+            let difference: Uint128 = (balance - sum_balance)?;
+            if !difference.is_zero() {
+                messages.push(snip20::transfer_msg(
+                    config.admin,
+                    difference,
+                    None,
+                    BLOCK_SIZE,
+                    registered_token.contract_hash,
+                    registered_token.address,
+                )?)
+            }
         }
     }
 
@@ -1129,9 +1134,9 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
 }
 
 fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
-    let swap_msg = if hop.position.is_some() {
+    let swap_msg = if let Some(position_unwrapped) = hop.position {
         to_binary(&ReceiveMsg::FillOrder {
-            position: hop.position.unwrap(),
+            position: position_unwrapped,
         })?
     } else {
         to_binary(&Snip20Swap::Swap {
@@ -1154,9 +1159,8 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
     let mut config: Config = config_store.load(CONFIG_KEY).unwrap();
     authorize(vec![config.admin.clone()], &env.message.sender)?;
 
-    if addresses_allowed_to_fill.is_some() {
-        let new_addresses_allowed_to_fill = addresses_allowed_to_fill.unwrap();
-        config.addresses_allowed_to_fill = new_addresses_allowed_to_fill;
+    if let Some(addresses_allowed_to_fill_unwrapped) = addresses_allowed_to_fill {
+        config.addresses_allowed_to_fill = addresses_allowed_to_fill_unwrapped;
         if !config
             .addresses_allowed_to_fill
             .contains(&env.contract.address)
@@ -1172,8 +1176,8 @@ fn update_config<S: Storage, A: Api, Q: Querier>(
             config.addresses_allowed_to_fill.push(config.admin.clone())
         }
     }
-    if execution_fee.is_some() {
-        config.execution_fee = execution_fee.unwrap();
+    if let Some(execution_fee_unwrapped) = execution_fee {
+        config.execution_fee = execution_fee_unwrapped;
     }
     config_store.store(CONFIG_KEY, &config)?;
 
