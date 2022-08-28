@@ -1095,7 +1095,7 @@ fn rescue_tokens<S: Storage, A: Api, Q: Querier>(
                     address: token_address_unwrapped,
                     contract_hash: registered_token.contract_hash.clone(),
                 },
-                key_unwrapped.to_string(),
+                key_unwrapped,
             )?;
             let sum_balance: Uint128 = registered_token.sum_balance;
             let difference: Uint128 = (balance - sum_balance)?;
