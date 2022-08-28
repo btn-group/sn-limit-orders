@@ -86,12 +86,24 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             key,
             page,
             page_size,
-        } => activity_records(deps, key, page, page_size, PREFIX_CANCEL_RECORDS),
+        } => activity_records(
+            deps,
+            key,
+            page.u128(),
+            page_size.u128(),
+            PREFIX_CANCEL_RECORDS,
+        ),
         QueryMsg::FillRecords {
             key,
             page,
             page_size,
-        } => activity_records(deps, key, page, page_size, PREFIX_FILL_RECORDS),
+        } => activity_records(
+            deps,
+            key,
+            page.u128(),
+            page_size.u128(),
+            PREFIX_FILL_RECORDS,
+        ),
         QueryMsg::Config {} => {
             let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY)?;
             Ok(to_binary(&config)?)
@@ -101,7 +113,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             key,
             page,
             page_size,
-        } => orders(deps, address, key, page, page_size),
+        } => orders(deps, address, key, page.u128(), page_size.u128()),
         QueryMsg::OrdersByPositions {
             address,
             key,
@@ -149,8 +161,8 @@ fn receive<S: Storage, A: Api, Q: Querier>(
 fn activity_records<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     key: String,
-    page: u64,
-    page_size: u64,
+    page: u128,
+    page_size: u128,
     storage_prefix: &[u8],
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
@@ -660,8 +672,8 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
 fn get_activity_records<S: ReadonlyStorage>(
     storage: &S,
     for_address: &CanonicalAddr,
-    page: u64,
-    page_size: u64,
+    page: u128,
+    page_size: u128,
     storage_prefix: &[u8],
 ) -> StdResult<(Vec<ActivityRecord>, Uint128)> {
     let total: u128 = storage_count(
@@ -696,8 +708,8 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     api: &A,
     storage: &S,
     for_address: &CanonicalAddr,
-    page: u64,
-    page_size: u64,
+    page: u128,
+    page_size: u128,
 ) -> StdResult<(Vec<HumanizedOrder>, u128)> {
     let total: u128 = storage_count(storage, for_address, PREFIX_ORDERS_COUNT)?;
     if total == 0 {
@@ -917,8 +929,8 @@ fn orders<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
     key: String,
-    page: u64,
-    page_size: u64,
+    page: u128,
+    page_size: u128,
 ) -> StdResult<Binary> {
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     // This is here so that the user can use their viewing key for butt for this
@@ -2152,8 +2164,8 @@ mod tests {
             &deps,
             QueryMsg::FillRecords {
                 key: MOCK_VIEWING_KEY.to_string(),
-                page: 0,
-                page_size: 50,
+                page: Uint128(0),
+                page_size: Uint128(50),
             },
         )
         .unwrap();

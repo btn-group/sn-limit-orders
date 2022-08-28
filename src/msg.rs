@@ -63,20 +63,20 @@ pub enum QueryAnswer {
 pub enum QueryMsg {
     CancelRecords {
         key: String,
-        page: u64,
-        page_size: u64,
+        page: Uint128,
+        page_size: Uint128,
     },
     FillRecords {
         key: String,
-        page: u64,
-        page_size: u64,
+        page: Uint128,
+        page_size: Uint128,
     },
     Config {},
     Orders {
         address: HumanAddr,
         key: String,
-        page: u64,
-        page_size: u64,
+        page: Uint128,
+        page_size: Uint128,
     },
     OrdersByPositions {
         address: HumanAddr,
