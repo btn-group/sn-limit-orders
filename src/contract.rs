@@ -174,7 +174,7 @@ fn activity_records<S: Storage, A: Api, Q: Querier>(
         get_activity_records(&deps.storage, &address, page, page_size, storage_prefix)?;
     let result = QueryAnswer::ActivityRecords {
         activity_records,
-        total: Some(total),
+        total: Some(Uint128(total)),
     };
     to_binary(&result)
 }
@@ -678,33 +678,28 @@ fn get_activity_records<S: ReadonlyStorage>(
     page: u128,
     page_size: u128,
     storage_prefix: &[u8],
-) -> StdResult<(Vec<ActivityRecord>, Uint128)> {
+) -> StdResult<(Vec<ActivityRecord>, u128)> {
     let total: u128 = storage_count(
         storage,
         for_address,
         prefix_activity_records_count(storage_prefix),
     )?;
-    if total == 0 {
-        return Ok((vec![], Uint128(0)));
+    let offset: u128 = page * page_size;
+    if total == 0 || offset >= total {
+        return Ok((vec![], total));
     }
-    let max_position: u128 = total - 1;
-    let option_highest_position: Option<u128> = max_position.checked_sub((page * page_size).into());
-    if option_highest_position.is_none() {
-        return Ok((vec![], Uint128(0)));
-    }
-    let highest_position: u128 = option_highest_position.unwrap();
-    let lowest_position: u128 = highest_position
-        .checked_sub((page_size - 1).into())
-        .unwrap_or(0);
+
+    let end = total - offset;
+    let start = end.saturating_sub(page_size);
     let store =
         ReadonlyPrefixedStorage::multilevel(&[storage_prefix, for_address.as_slice()], storage);
     let mut activity_records: Vec<ActivityRecord> = Vec::new();
     let store = TypedStore::<ActivityRecord, _>::attach(&store);
-    for position in highest_position..=lowest_position {
+    for position in (start..end).rev() {
         activity_records.push(store.load(&position.to_le_bytes())?);
     }
 
-    Ok((activity_records, Uint128(total)))
+    Ok((activity_records, total))
 }
 
 fn get_orders<A: Api, S: ReadonlyStorage>(
@@ -715,41 +710,22 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
     page_size: u128,
 ) -> StdResult<(Vec<HumanizedOrder>, u128)> {
     let total: u128 = storage_count(storage, for_address, PREFIX_ORDERS_COUNT)?;
-    if total == 0 {
-        return Ok((vec![], 0));
+    let offset: u128 = page * page_size;
+    if total == 0 || offset >= total {
+        return Ok((vec![], total));
     }
 
-    let max_position: u128 = total - 1;
-    let option_highest_position: Option<u128> = max_position.checked_sub((page * page_size).into());
-    if option_highest_position.is_none() {
-        return Ok((vec![], 0));
-    }
-    let highest_position: u128 = option_highest_position.unwrap();
-    let lowest_position: u128 = highest_position
-        .checked_sub((page_size - 1).into())
-        .unwrap_or(0);
-
+    let end = total - offset;
+    let start = end.saturating_sub(page_size);
     let store =
         ReadonlyPrefixedStorage::multilevel(&[PREFIX_ORDERS, for_address.as_slice()], storage);
     let mut orders: Vec<HumanizedOrder> = Vec::new();
     let store = TypedStore::<Order, _>::attach(&store);
-    for position in highest_position..=lowest_position {
+    for position in (start..end).rev() {
         orders.push(store.load(&position.to_le_bytes())?.into_humanized(api)?);
     }
 
     Ok((orders, total))
-}
-
-fn storage_count<S: ReadonlyStorage>(
-    store: &S,
-    for_address: &CanonicalAddr,
-    storage_prefix: &[u8],
-) -> StdResult<u128> {
-    let store = ReadonlyPrefixedStorage::new(storage_prefix, store);
-    let store = TypedStore::<u128, _>::attach(&store);
-    let position: Option<u128> = store.may_load(for_address.as_slice())?;
-
-    Ok(position.unwrap_or(0))
 }
 
 fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
@@ -1131,6 +1107,18 @@ fn space_pad(block_size: usize, message: &mut Vec<u8>) -> &mut Vec<u8> {
     message.reserve(missing);
     message.extend(std::iter::repeat(b' ').take(missing));
     message
+}
+
+fn storage_count<S: ReadonlyStorage>(
+    store: &S,
+    for_address: &CanonicalAddr,
+    storage_prefix: &[u8],
+) -> StdResult<u128> {
+    let store = ReadonlyPrefixedStorage::new(storage_prefix, store);
+    let store = TypedStore::<u128, _>::attach(&store);
+    let position: Option<u128> = store.may_load(for_address.as_slice())?;
+
+    Ok(position.unwrap_or(0))
 }
 
 fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
@@ -1673,7 +1661,7 @@ mod tests {
             PREFIX_CANCEL_RECORDS,
         )
         .unwrap();
-        assert_eq!(total, Uint128(1));
+        assert_eq!(total, 1);
         assert_eq!(
             activity_records[0],
             ActivityRecord {
