@@ -466,10 +466,11 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         storage_count(&mut deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
     let creator_order_position =
         storage_count(&mut deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
-    let creator_order = Order {
-        position: Uint128(creator_order_position),
+    // Store contract order first
+    let mut order = Order {
+        position: Uint128(contract_order_position),
         execution_fee: None,
-        other_storage_position: Uint128(contract_order_position),
+        other_storage_position: Uint128(creator_order_position),
         from_token: env.message.sender.clone(),
         to_token: to_token,
         creator: creator_address.clone(),
@@ -482,16 +483,16 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         created_at_block_time: env.block.time,
         created_at_block_height: env.block.height,
     };
-    let mut contract_order = creator_order.clone();
-    contract_order.position = Uint128(contract_order_position);
-    contract_order.other_storage_position = Uint128(creator_order_position);
-    append_order(&mut deps.storage, &contract_order, &contract_address)?;
-    append_order(&mut deps.storage, &creator_order, &creator_address)?;
+    append_order(&mut deps.storage, &order, &contract_address)?;
+    // Store creator order next
+    order.position = Uint128(creator_order_position);
+    order.other_storage_position = Uint128(contract_order_position);
+    append_order(&mut deps.storage, &order, &creator_address)?;
 
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
-        data: Some(to_binary(&creator_order.into_humanized(&deps.api)?)?),
+        data: Some(to_binary(&order.into_humanized(&deps.api)?)?),
     })
 }
 
