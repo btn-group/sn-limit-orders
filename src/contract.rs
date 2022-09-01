@@ -625,7 +625,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
             &admin_canonical_address,
             PREFIX_FILL_RECORDS_COUNT,
         )?),
-        order_position: creator_order.position,
+        order_position: creator_order.other_storage_position,
         activity: 1,
         result_from_amount_filled: Some(creator_order.from_amount_filled),
         result_net_to_amount_filled: Some(creator_order.net_to_amount_filled),
