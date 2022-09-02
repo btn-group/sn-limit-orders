@@ -1195,9 +1195,11 @@ fn update_creator_order_and_associated_contract_order<S: Storage>(
     let mut contract_store =
         PrefixedStorage::multilevel(&[PREFIX_ORDERS, contract_address.as_slice()], store);
     let mut contract_store = TypedStoreMut::<Order, _, _>::attach(&mut contract_store);
-    let mut contract_order: Order = creator_order.clone();
-    contract_order.position = creator_order.other_storage_position;
-    contract_order.other_storage_position = creator_order.position;
+    let contract_order_position: Uint128 = creator_order.other_storage_position;
+    let creator_order_position: Uint128 = creator_order.position;
+    let mut contract_order = creator_order;
+    contract_order.position = contract_order_position;
+    contract_order.other_storage_position = creator_order_position;
     contract_store.store(
         &contract_order.position.u128().to_le_bytes(),
         &contract_order,
