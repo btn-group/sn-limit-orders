@@ -56,11 +56,11 @@ pub fn read_registered_token<S: Storage>(
 pub fn write_registered_token<S: Storage>(
     storage: &mut S,
     token_address: &CanonicalAddr,
-    registered_token: RegisteredToken,
+    registered_token: &RegisteredToken,
 ) -> StdResult<()> {
     let mut registered_tokens_storage = PrefixedStorage::new(PREFIX_REGISTERED_TOKENS, storage);
     let mut registered_tokens_storage = TypedStoreMut::attach(&mut registered_tokens_storage);
-    registered_tokens_storage.store(token_address.as_slice(), &registered_token)
+    registered_tokens_storage.store(token_address.as_slice(), registered_token)
 }
 
 // === Orders ===
