@@ -697,10 +697,6 @@ fn get_activity_records<S: ReadonlyStorage>(
         prefix_activity_records_count(storage_prefix),
     )?;
     let offset: u128 = page * page_size;
-    if total == 0 || offset >= total {
-        return Ok((vec![], total));
-    }
-
     let end = total - offset;
     let start = end.saturating_sub(page_size);
     let store =
@@ -723,10 +719,6 @@ fn get_orders<A: Api, S: ReadonlyStorage>(
 ) -> StdResult<(Vec<HumanizedOrder>, u128)> {
     let total: u128 = storage_count(storage, for_address, PREFIX_ORDERS_COUNT)?;
     let offset: u128 = page * page_size;
-    if total == 0 || offset >= total {
-        return Ok((vec![], total));
-    }
-
     let end = total - offset;
     let start = end.saturating_sub(page_size);
     let store =
