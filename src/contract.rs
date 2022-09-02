@@ -527,11 +527,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
         deps.api.canonical_address(&env.contract.address)?;
     let contract_order =
         order_at_position(&mut deps.storage, &contract_canonical_address, position)?;
-    let mut creator_order = order_at_position(
-        &mut deps.storage,
-        &contract_order.creator,
-        contract_order.other_storage_position.u128(),
-    )?;
+    let creator_order_position: Uint128 = contract_order.other_storage_position;
+    let mut creator_order = contract_order;
+    creator_order.position = creator_order_position;
+    creator_order.other_storage_position = Uint128(position);
     // Check the token is the same at the to_token
     validate_human_addr(
         &creator_order.to_token,
