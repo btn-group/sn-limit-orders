@@ -270,7 +270,15 @@ fn append_activity_record<S: Storage>(
         store,
         for_address,
         prefix_activity_records_count(storage_prefix),
-        activity_record.position.u128() + 1,
+        activity_record
+            .position
+            .u128()
+            .checked_add(1)
+            .ok_or_else(|| {
+                StdError::generic_err(
+                    "Reached implementation limit for the number of activity records per address.",
+                )
+            })?,
     )
 }
 
@@ -298,7 +306,11 @@ fn append_order<S: Storage>(
         store,
         for_address,
         PREFIX_ORDERS_COUNT,
-        order.position.u128() + 1,
+        order.position.u128().checked_add(1).ok_or_else(|| {
+            StdError::generic_err(
+                "Reached implementation limit for the number of orders per address.",
+            )
+        })?,
     )
 }
 
