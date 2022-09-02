@@ -208,18 +208,15 @@ fn set_execution_fee_for_order<S: Storage, A: Api, Q: Querier>(
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
     let user_canonical_address: CanonicalAddr = deps.api.canonical_address(&from)?;
-    let next_order_position: u128 = storage_count(
-        &mut deps.storage,
-        &user_canonical_address,
-        PREFIX_ORDERS_COUNT,
-    )?;
+    let next_order_position: u128 =
+        storage_count(&deps.storage, &user_canonical_address, PREFIX_ORDERS_COUNT)?;
     let order_position: u128 = if next_order_position == 0 {
         return Err(StdError::generic_err("Order does not exist."));
     } else {
         next_order_position - 1
     };
     let mut creator_order =
-        order_at_position(&mut deps.storage, &user_canonical_address, order_position)?;
+        order_at_position(&deps.storage, &user_canonical_address, order_position)?;
     validate_uint128(
         Uint128::from(creator_order.created_at_block_height),
         Uint128::from(env.block.height),
@@ -314,7 +311,7 @@ fn append_order<S: Storage>(
     )
 }
 
-fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> StdResult<Uint128> {
+fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
     let user_butt_balance_as_u128: u128 = user_butt_balance.u128();
     let nom = if user_butt_balance_as_u128 >= 100_000_000_000 {
         0
@@ -335,7 +332,7 @@ fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> StdResult<Ui
         (U256::from(to_amount.u128()) * U256::from(nom) / U256::from(10_000)).as_u128()
     };
 
-    return Ok(Uint128(fee));
+    Uint128(fee)
 }
 
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
@@ -347,7 +344,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
     let mut creator_order = order_at_position(
-        &mut deps.storage,
+        &deps.storage,
         &deps.api.canonical_address(&env.message.sender)?,
         position,
     )?;
@@ -392,7 +389,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     creator_order.cancelled = true;
     update_creator_order_and_associated_contract_order(
         &mut deps.storage,
-        &creator_order.creator.clone(),
+        &creator_order.creator,
         creator_order.clone(),
         &contract_canonical_address,
     )?;
@@ -401,7 +398,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
         position: Uint128(storage_count(
-            &mut deps.storage,
+            &deps.storage,
             &admin_canonical_address,
             PREFIX_CANCEL_RECORDS_COUNT,
         )?),
@@ -460,7 +457,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     // Calculate fee
     let user_butt_balance: Uint128 =
         query_balance_of_token(deps, from.clone(), config.butt, butt_viewing_key)?;
-    let fee = calculate_fee(user_butt_balance, to_amount)?;
+    let fee = calculate_fee(user_butt_balance, to_amount);
 
     // Increase sum balance for from_token
     let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
@@ -477,23 +474,23 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     let contract_address: CanonicalAddr = deps.api.canonical_address(&env.contract.address)?;
     let creator_address: CanonicalAddr = deps.api.canonical_address(&from)?;
     let contract_order_position =
-        storage_count(&mut deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
+        storage_count(&deps.storage, &contract_address, PREFIX_ORDERS_COUNT)?;
     let creator_order_position =
-        storage_count(&mut deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
+        storage_count(&deps.storage, &creator_address, PREFIX_ORDERS_COUNT)?;
     // Store contract order first
     let mut order = Order {
         position: Uint128(contract_order_position),
         execution_fee: None,
         other_storage_position: Uint128(creator_order_position),
         from_token: env.message.sender.clone(),
-        to_token: to_token,
+        to_token,
         creator: creator_address.clone(),
         from_amount,
         from_amount_filled: Uint128(0),
         net_to_amount: (to_amount - fee)?,
         net_to_amount_filled: Uint128(0),
         cancelled: false,
-        fee: fee,
+        fee,
         created_at_block_time: env.block.time,
         created_at_block_height: env.block.height,
     };
@@ -525,8 +522,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
 
     let contract_canonical_address: CanonicalAddr =
         deps.api.canonical_address(&env.contract.address)?;
-    let contract_order =
-        order_at_position(&mut deps.storage, &contract_canonical_address, position)?;
+    let contract_order = order_at_position(&deps.storage, &contract_canonical_address, position)?;
     let creator_order_position: Uint128 = contract_order.other_storage_position;
     let mut creator_order = contract_order;
     creator_order.position = creator_order_position;
@@ -550,12 +546,10 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     }
 
     let mut address_to_send_execution_fee_to: Option<HumanAddr> = None;
-    if creator_order.from_amount_filled.is_zero() {
-        if creator_order.execution_fee.is_some() {
-            address_to_send_execution_fee_to = match read_route_state(&deps.storage)? {
-                Some(RouteState { initiator, .. }) => Some(initiator),
-                None => Some(from.clone()),
-            }
+    if creator_order.from_amount_filled.is_zero() && creator_order.execution_fee.is_some() {
+        address_to_send_execution_fee_to = match read_route_state(&deps.storage)? {
+            Some(RouteState { initiator, .. }) => Some(initiator),
+            None => Some(from.clone()),
         }
     }
     // Update net_to_amount_filled and from_amount_filled
@@ -632,7 +626,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     let admin_canonical_address: CanonicalAddr = deps.api.canonical_address(&config.admin)?;
     let activity_record: ActivityRecord = ActivityRecord {
         position: Uint128(storage_count(
-            &mut deps.storage,
+            &deps.storage,
             &admin_canonical_address,
             PREFIX_FILL_RECORDS_COUNT,
         )?),
@@ -671,10 +665,10 @@ fn finalize_route<S: Storage, A: Api, Q: Querier>(
             // it is intended to always make sure that the route was completed successfully
             // otherwise we revert the transaction
             authorize(vec![env.contract.address.clone()], &env.message.sender)?;
-            if remaining_hops.len() != 0 || current_hop.is_some() {
-                return Err(StdError::generic_err(format!(
-                    "Cannot finalize: route still contains hops."
-                )));
+            if !remaining_hops.is_empty() || current_hop.is_some() {
+                return Err(StdError::generic_err(
+                    "Cannot finalize: route still contains hops.".to_string(),
+                ));
             }
             delete_route_state(&mut deps.storage);
             Ok(HandleResponse::default())
@@ -823,7 +817,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 // we can rescue the dust later when worthwhile while making gas more predictable
                 if next_hop.trade_smart_contract.address == env.contract.address {
                     let next_trade_order = order_at_position(
-                        &mut deps.storage,
+                        &deps.storage,
                         &deps.api.canonical_address(&env.contract.address)?,
                         next_hop.position.unwrap().u128(),
                     )?;
@@ -1780,41 +1774,41 @@ mod tests {
         // = when user has a BUTT balance over or equal to 100_000_000_000
         let mut butt_balance: Uint128 = Uint128(100_000_000_000);
         // = * it returns a zero fee
-        assert_eq!(calculate_fee(butt_balance, amount).unwrap(), Uint128(0));
+        assert_eq!(calculate_fee(butt_balance, amount), Uint128(0));
         // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
         butt_balance = Uint128(99_999_999_999);
         let denom: Uint128 = Uint128(10_000);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount).unwrap(),
+            calculate_fee(butt_balance, amount),
             amount.multiply_ratio(Uint128(6), denom)
         );
         // = when user has a BUTT balance over or equal to 25_000_000_000 and under 50_000_000_000
         butt_balance = Uint128(49_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount).unwrap(),
+            calculate_fee(butt_balance, amount),
             amount.multiply_ratio(Uint128(12), denom)
         );
         // = when user has a BUTT balance over or equal to 12_500_000_000 and under 25_000_000_000
         butt_balance = Uint128(24_999_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount).unwrap(),
+            calculate_fee(butt_balance, amount),
             amount.multiply_ratio(Uint128(18), denom)
         );
         // = when user has a BUTT balance over or equal to 6_250_000_000 and under 12_500_000_000
         butt_balance = Uint128(12_499_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount).unwrap(),
+            calculate_fee(butt_balance, amount),
             amount.multiply_ratio(Uint128(24), denom)
         );
         // = when user has a BUTT balance under 6_250_000_000
         butt_balance = Uint128(6_249_999_999);
         // = * it returns the appropriate fee
         assert_eq!(
-            calculate_fee(butt_balance, amount).unwrap(),
+            calculate_fee(butt_balance, amount),
             amount.multiply_ratio(Uint128(30), denom)
         );
     }
@@ -1898,7 +1892,7 @@ mod tests {
             net_to_amount: Uint128(MOCK_AMOUNT),
             net_to_amount_filled: Uint128(0),
             cancelled: false,
-            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)).unwrap(),
+            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)),
             created_at_block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             created_at_block_height: mock_env(MOCK_ADMIN, &[]).block.height,
         };
