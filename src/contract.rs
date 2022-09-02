@@ -374,7 +374,7 @@ fn cancel_order<S: Storage, A: Api, Q: Querier>(
     write_registered_token(
         &mut deps.storage,
         &from_token_address_canonical,
-        from_registered_token.clone(),
+        &from_registered_token,
     )?;
 
     // Send refund to the creator
@@ -470,7 +470,7 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     write_registered_token(
         &mut deps.storage,
         &from_token_address_canonical,
-        from_token_details,
+        &from_token_details,
     )?;
 
     // Store order
@@ -626,7 +626,7 @@ fn fill_order<S: Storage, A: Api, Q: Querier>(
     write_registered_token(
         &mut deps.storage,
         &deps.api.canonical_address(&from_registered_token.address)?,
-        from_registered_token,
+        &from_registered_token,
     )?;
 
     // Create activity record
@@ -1018,7 +1018,7 @@ fn register_tokens<S: Storage, A: Api, Q: Querier>(
                 contract_hash: token.contract_hash.clone(),
                 sum_balance: Uint128(0),
             };
-            write_registered_token(&mut deps.storage, &token_address_canonical, token_details)?;
+            write_registered_token(&mut deps.storage, &token_address_canonical, &token_details)?;
             messages.push(snip20::register_receive_msg(
                 env.contract_code_hash.clone(),
                 None,
@@ -3162,7 +3162,7 @@ mod tests {
         write_registered_token(
             &mut deps.storage,
             &deps.api.canonical_address(&mock_token().address).unwrap(),
-            registered_token,
+            &registered_token,
         )
         .unwrap();
         let handle_result = handle(&mut deps, mock_env(MOCK_ADMIN, &[]), handle_msg);
