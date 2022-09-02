@@ -756,7 +756,10 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     let mut msgs = vec![snip20::send_msg(
         first_hop.trade_smart_contract.address.clone(),
         borrow_amount,
-        Some(swap_msg(env.contract.address.clone(), first_hop.clone())?),
+        Some(swap_msg(
+            env.contract.address.clone(),
+            first_hop.position.as_ref(),
+        )?),
         None,
         BLOCK_SIZE,
         first_hop.from_token.contract_hash,
@@ -830,7 +833,10 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                 messages.push(snip20::send_msg(
                     next_hop.trade_smart_contract.address.clone(),
                     amount,
-                    Some(swap_msg(env.contract.address.clone(), next_hop.clone())?),
+                    Some(swap_msg(
+                        env.contract.address.clone(),
+                        next_hop.position.as_ref(),
+                    )?),
                     None,
                     BLOCK_SIZE,
                     next_hop.from_token.contract_hash,
@@ -1118,10 +1124,10 @@ fn storage_count<S: ReadonlyStorage>(
     Ok(position.unwrap_or(0))
 }
 
-fn swap_msg(contract_address: HumanAddr, hop: Hop) -> StdResult<Binary> {
-    let swap_msg = if let Some(position_unwrapped) = hop.position {
+fn swap_msg(contract_address: HumanAddr, position: Option<&Uint128>) -> StdResult<Binary> {
+    let swap_msg = if let Some(position_unwrapped) = position {
         to_binary(&ReceiveMsg::FillOrder {
-            position: position_unwrapped,
+            position: *position_unwrapped,
         })?
     } else {
         to_binary(&Snip20Swap::Swap {
