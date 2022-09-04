@@ -91,7 +91,7 @@ cd code
 ```sh
 # Store contracts required for test
 secretcli tx compute store snip-20-reference-impl.wasm.gz --from a --gas 3000000 -y --keyring-backend test
-secretcli tx compute store sn-limit-orders.wasm.gz --from a --gas 3000000 -y --keyring-backend test
+secretcli tx compute store sn-limit-orders-6.wasm.gz --from a --gas 3000000 -y --keyring-backend test
 
 # Get the contract's id
 secretcli query compute list-code
@@ -102,7 +102,7 @@ secretcli query compute list-code
 ```sh
 # Init SNIP-20 (SSCRT)
 CODE_ID=1
-INIT='{ "name": "SSCRT", "symbol": "SSCRT", "decimals": 6, "initial_balances": [{ "address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "amount": "1000000000000000000" }, { "address": "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c", "amount": "1000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": true, "enable_redeem": true, "enable_mint": false, "enable_burn": false } }'
+INIT='{ "name": "SSCRT", "symbol": "SSCRT", "decimals": 6, "initial_balances": [{ "address": "secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh", "amount": "1000000000000000000" }, { "address": "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn", "amount": "1000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": true, "enable_redeem": true, "enable_mint": false, "enable_burn": false } }'
 secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "SSCRT" -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 
 # Set viewing key for SSCRT
@@ -110,7 +110,7 @@ secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"se
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"set_viewing_key": {"key": "DoTheRightThing.", "padding": "BUTT2022."}}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 
 # Init BUTTON (BUTT)
-INIT='{ "name": "BUTTON", "symbol": "BUTT", "decimals": 6, "initial_balances": [{ "address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "amount": "2000000000000000000" }, { "address": "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c", "amount": "2000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": false, "enable_redeem": false, "enable_mint": false, "enable_burn": false } }'
+INIT='{ "name": "BUTTON", "symbol": "BUTT", "decimals": 6, "initial_balances": [{ "address": "secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh", "amount": "2000000000000000000" }, { "address": "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn", "amount": "2000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": false, "enable_redeem": false, "enable_mint": false, "enable_burn": false } }'
 secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "BUTT" -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 
 # Set viewing key for BUTT
@@ -118,7 +118,7 @@ secretcli tx compute execute secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3 '{"se
 secretcli tx compute execute secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3 '{"set_viewing_key": {"key": "DoTheRightThing.", "padding": "BUTT2022."}}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 
 # Init SXMR (MONERO)
-INIT='{ "name": "SXMR", "symbol": "SXMR", "decimals": 12, "initial_balances": [{ "address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "amount": "3000000000000000000" }, { "address": "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c", "amount": "3000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": false, "enable_redeem": false, "enable_mint": false, "enable_burn": false } }'
+INIT='{ "name": "SXMR", "symbol": "SXMR", "decimals": 12, "initial_balances": [{ "address": "secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh", "amount": "3000000000000000000" }, { "address": "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn", "amount": "3000000000000000000" }], "prng_seed": "RG9UaGVSaWdodFRoaW5nLg==", "config": { "public_total_supply": true, "enable_deposit": false, "enable_redeem": false, "enable_mint": false, "enable_burn": false } }'
 secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "SXMR" -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 
 # Set viewing key for SXMR
@@ -131,8 +131,8 @@ secretcli tx compute execute secret18r5szma8hm93pvx6lwpjwyxruw27e0k57tncfy '{"se
 ```sh
 # Init SN Limit Orders
 CODE_ID=2
-INIT='{ "butt": {"address": "secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"} }'
-secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "Limit orderes | btn.group" -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+INIT='{ "butt": {"address": "secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"}, "execution_fee": "0", "sscrt": {"address": "secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"} }'
+secretcli tx compute instantiate $CODE_ID "$INIT" --from a --label "Limit orders 6 | btn.group" -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
@@ -153,15 +153,21 @@ secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"c
 2. Query orders
 
 ``` sh
-secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
-secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c", "key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
-secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
+secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh", "key": "DoTheRightThing.", "page": "0", "page_size": "50"}}'
+secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn", "key": "DoTheRightThing.", "page": "0", "page_size": "50"}}'
+secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"orders": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "key": "DoTheRightThing.", "page": "0", "page_size": "50"}}'
 ```
 
-3. Query activity records
+3. Query cancel records
 
 ``` sh
-secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"activity_records": {"key": "DoTheRightThing.", "page": 0, "page_size": 50}}'
+secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"cancel_records": {"key": "DoTheRightThing.", "page": "0", "page_size": "50"}}'
+```
+
+4. Query fill records
+
+``` sh
+secretcli query compute query secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"fill_records": {"key": "DoTheRightThing.", "page": "0", "page_size": "50"}}'
 ```
 
 ### Handle functions
@@ -185,43 +191,43 @@ secretcli tx compute execute secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3 '{"se
 3. Rescue tokens
 
 ``` sh
-secretcli query account secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06
-secretcli tx send secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06 secret1vjecguu37pmd577339wrdp208ddzymku0apnlw 1000uscrt
+secretcli query account secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh
+secretcli tx send secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh secret1vjecguu37pmd577339wrdp208ddzymku0apnlw 1000uscrt
 secretcli query account secret1vjecguu37pmd577339wrdp208ddzymku0apnlw
 secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"rescue_tokens":{ "denom": "uscrt" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 ``` sh
-secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "key": "DoTheRightThing."}}'
+secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "key": "DoTheRightThing."}}'
 secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"transfer": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "500000000000000000" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"rescue_tokens":{ "key": "DoTheRightThing.", "token_address": "secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
-secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "key": "DoTheRightThing."}}'
+secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "key": "DoTheRightThing."}}'
 ```
 
-4. Update addresses allowed to fill
+4. Update config
 
 ``` sh
-secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_addresses_allowed_to_fill": { "addresses_allowed_to_fill": ["secret10mmsl6m0ws7ux6p0cetczt3k844ndtjj5zjp06", "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c"] }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"update_config": { "addresses_allowed_to_fill": ["secret16n3uxv6ur8exjk7xlpw4glat00pdytrshenwvh", "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn"] }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 5. Cancel order
 
 ``` sh
-secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret18kje49yrwlhzgqrlp9dfstx9chktn4arph8k2c", "key": "DoTheRightThing."}}'
-secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "0", "msg": "eyJjYW5jZWxfb3JkZXIiOiB7InBvc2l0aW9uIjogMCB9fQ==" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+secretcli query compute query secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"balance": {"address": "secret1glu5e4xe9yl7a2cudhtdrkr2de696ys4nenzvn", "key": "DoTheRightThing."}}'
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"cancel_order": { "from_token_address": "secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg", "position": "0" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 6. Fill order
 
 ``` sh
-secretcli tx compute execute secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3 '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "1", "msg": "eyJmaWxsX29yZGVyIjogeyJwb3NpdGlvbiI6IDB9fQ==" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
-secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "550", "msg": "eyJmaWxsX29yZGVyIjogeyJwb3NpdGlvbiI6IDJ9fQ==" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+secretcli tx compute execute secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3 '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "1", "msg": "eyJmaWxsX29yZGVyIjogeyJwb3NpdGlvbiI6ICIwIn19" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+secretcli tx compute execute secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg '{"send": { "recipient": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "amount": "550", "msg": "eyJmaWxsX29yZGVyIjogeyJwb3NpdGlvbiI6ICIyIn19" }}' --from a -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 7. Borrow and swap
 
 ``` sh
-secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"handle_first_hop": { "borrow_amount": "555", "hops": [{"from_token": {"address": "secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"}, "trade_smart_contract": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "contract_hash": "1776A0E9E1E74D7382BFF798EBEF5D4CAE012BF465C209BA45059F174684F167"}, "position": 0}, {"from_token": {"address": "secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"}, "trade_smart_contract": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "contract_hash": "1776A0E9E1E74D7382BFF798EBEF5D4CAE012BF465C209BA45059F174684F167"}, "position": 1}], "minimum_acceptable_amount": "10" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
+secretcli tx compute execute secret1vjecguu37pmd577339wrdp208ddzymku0apnlw '{"handle_first_hop": { "borrow_amount": "555", "hops": [{"from_token": {"address": "secret1hqrdl6wstt8qzshwc6mrumpjk9338k0lpsefm3", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"}, "trade_smart_contract": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "contract_hash": "1776A0E9E1E74D7382BFF798EBEF5D4CAE012BF465C209BA45059F174684F167"}, "position": "0"}, {"from_token": {"address": "secret18vd8fpwxzck93qlwghaj6arh4p7c5n8978vsyg", "contract_hash": "35F5DB2BC5CD56815D10C7A567D6827BECCB8EAF45BC3FA016930C4A8209EA69"}, "trade_smart_contract": {"address": "secret1vjecguu37pmd577339wrdp208ddzymku0apnlw", "contract_hash": "1776A0E9E1E74D7382BFF798EBEF5D4CAE012BF465C209BA45059F174684F167"}, "position": "1"}], "minimum_acceptable_amount": "10" }}' --from b -y --keyring-backend test --gas 3000000 --gas-prices=3.0uscrt
 ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
