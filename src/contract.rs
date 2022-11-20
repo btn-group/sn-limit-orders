@@ -136,18 +136,9 @@ fn receive<S: Storage, A: Api, Q: Querier>(
                 set_execution_fee_for_order(deps, &env, from, amount)
             }
             ReceiveMsg::CreateOrder {
-                butt_viewing_key,
                 to_amount,
                 to_token,
-            } => create_order(
-                deps,
-                &env,
-                from,
-                amount,
-                butt_viewing_key,
-                to_amount,
-                to_token,
-            ),
+            } => create_order(deps, &env, from, amount, to_amount, to_token),
             ReceiveMsg::FillOrder { position } => {
                 fill_order(deps, &env, from, amount, position.u128())
             }
@@ -311,30 +302,6 @@ fn append_order<S: Storage>(
     )
 }
 
-fn calculate_fee(user_butt_balance: Uint128, to_amount: Uint128) -> Uint128 {
-    let user_butt_balance_as_u128: u128 = user_butt_balance.u128();
-    let nom = if user_butt_balance_as_u128 >= 100_000_000_000 {
-        0
-    } else if user_butt_balance_as_u128 >= 50_000_000_000 {
-        6
-    } else if user_butt_balance_as_u128 >= 25_000_000_000 {
-        12
-    } else if user_butt_balance_as_u128 >= 12_500_000_000 {
-        18
-    } else if user_butt_balance_as_u128 >= 6_250_000_000 {
-        24
-    } else {
-        30
-    };
-    let fee: u128 = if nom == 0 {
-        0
-    } else {
-        (U256::from(to_amount.u128()) * U256::from(nom) / U256::from(10_000)).as_u128()
-    };
-
-    Uint128(fee)
-}
-
 fn cancel_order<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
@@ -442,22 +409,15 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
     env: &Env,
     from: HumanAddr,
     from_amount: Uint128,
-    butt_viewing_key: String,
     to_amount: Uint128,
     to_token: HumanAddr,
 ) -> StdResult<HandleResponse> {
-    let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     let to_token_address_canonical = deps.api.canonical_address(&to_token)?;
     let to_token_details: Option<RegisteredToken> =
         read_registered_token(&deps.storage, &to_token_address_canonical);
     if to_token_details.is_none() {
         return Err(StdError::generic_err("To token is not registered."));
     }
-
-    // Calculate fee
-    let user_butt_balance: Uint128 =
-        query_balance_of_token(deps, from.clone(), config.butt, butt_viewing_key)?;
-    let fee = calculate_fee(user_butt_balance, to_amount);
 
     // Increase sum balance for from_token
     let from_token_address_canonical = deps.api.canonical_address(&env.message.sender)?;
@@ -487,10 +447,10 @@ fn create_order<S: Storage, A: Api, Q: Querier>(
         creator: creator_address.clone(),
         from_amount,
         from_amount_filled: Uint128(0),
-        net_to_amount: (to_amount - fee)?,
+        net_to_amount: to_amount,
         net_to_amount_filled: Uint128(0),
         cancelled: false,
-        fee,
+        fee: Uint128(0),
         created_at_block_time: env.block.time,
         created_at_block_height: env.block.height,
     };
@@ -1221,7 +1181,6 @@ mod tests {
     // === HELPERS ===
     fn create_order_helper<S: Storage, A: Api, Q: Querier>(deps: &mut Extern<S, A, Q>) {
         let receive_msg = ReceiveMsg::CreateOrder {
-            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
             to_amount: Uint128(MOCK_AMOUNT),
             to_token: mock_token().address,
         };
@@ -1774,58 +1733,11 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_fee() {
-        let amount: Uint128 = Uint128(MOCK_AMOUNT);
-
-        // = when user has a BUTT balance over or equal to 100_000_000_000
-        let mut butt_balance: Uint128 = Uint128(100_000_000_000);
-        // = * it returns a zero fee
-        assert_eq!(calculate_fee(butt_balance, amount), Uint128(0));
-        // = when user has a BUTT balance over or equal to 50_000_000_000 and under 100_000_000_000
-        butt_balance = Uint128(99_999_999_999);
-        let denom: Uint128 = Uint128(10_000);
-        // = * it returns the appropriate fee
-        assert_eq!(
-            calculate_fee(butt_balance, amount),
-            amount.multiply_ratio(Uint128(6), denom)
-        );
-        // = when user has a BUTT balance over or equal to 25_000_000_000 and under 50_000_000_000
-        butt_balance = Uint128(49_999_999_999);
-        // = * it returns the appropriate fee
-        assert_eq!(
-            calculate_fee(butt_balance, amount),
-            amount.multiply_ratio(Uint128(12), denom)
-        );
-        // = when user has a BUTT balance over or equal to 12_500_000_000 and under 25_000_000_000
-        butt_balance = Uint128(24_999_999_999);
-        // = * it returns the appropriate fee
-        assert_eq!(
-            calculate_fee(butt_balance, amount),
-            amount.multiply_ratio(Uint128(18), denom)
-        );
-        // = when user has a BUTT balance over or equal to 6_250_000_000 and under 12_500_000_000
-        butt_balance = Uint128(12_499_999_999);
-        // = * it returns the appropriate fee
-        assert_eq!(
-            calculate_fee(butt_balance, amount),
-            amount.multiply_ratio(Uint128(24), denom)
-        );
-        // = when user has a BUTT balance under 6_250_000_000
-        butt_balance = Uint128(6_249_999_999);
-        // = * it returns the appropriate fee
-        assert_eq!(
-            calculate_fee(butt_balance, amount),
-            amount.multiply_ratio(Uint128(30), denom)
-        );
-    }
-
-    #[test]
     fn test_create_order() {
         let (_init_result, mut deps) = init_helper(true);
 
         // = when to_token isn't registered
         let receive_msg = ReceiveMsg::CreateOrder {
-            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
             to_amount: Uint128(MOCK_AMOUNT),
             to_token: mock_user_address(),
         };
@@ -1848,7 +1760,6 @@ mod tests {
 
         // = when to_token is registered
         let receive_msg = ReceiveMsg::CreateOrder {
-            butt_viewing_key: MOCK_VIEWING_KEY.to_string(),
             to_amount: Uint128(MOCK_AMOUNT),
             to_token: mock_token().address,
         };
@@ -1898,7 +1809,7 @@ mod tests {
             net_to_amount: Uint128(MOCK_AMOUNT),
             net_to_amount_filled: Uint128(0),
             cancelled: false,
-            fee: calculate_fee(Uint128(MOCK_AMOUNT), Uint128(MOCK_AMOUNT)),
+            fee: Uint128(0),
             created_at_block_time: mock_env(MOCK_ADMIN, &[]).block.time,
             created_at_block_height: mock_env(MOCK_ADMIN, &[]).block.height,
         };
