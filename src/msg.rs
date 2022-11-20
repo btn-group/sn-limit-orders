@@ -90,7 +90,6 @@ pub enum QueryMsg {
 pub enum ReceiveMsg {
     SetExecutionFeeForOrder {},
     CreateOrder {
-        butt_viewing_key: String,
         to_amount: Uint128,
         to_token: HumanAddr,
     },
