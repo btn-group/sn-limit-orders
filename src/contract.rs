@@ -702,7 +702,35 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Route must be 2 hops."));
     }
 
-    // unwrap is cool because `hops.len() >= 2`
+    // Figure out who to send excess to
+    // If it's two limit orders, it's the creator of the order with the latest position
+    // Otherwise, it's the initiator
+    let mut send_excess_to: HumanAddr = env.message.sender.clone();
+    let hop_one = hops.get(0).unwrap();
+    let hop_two = hops.get(1).unwrap();
+    if hop_one.position.is_some()
+        && hop_two.position.is_some()
+        && hop_one.trade_smart_contract.address == env.contract.address
+        && hop_two.trade_smart_contract.address == env.contract.address
+    {
+        let order_one: Order = order_at_position(
+            &deps.storage,
+            &deps.api.canonical_address(&env.contract.address)?,
+            hop_one.position.unwrap().u128(),
+        )?;
+        let order_two: Order = order_at_position(
+            &deps.storage,
+            &deps.api.canonical_address(&env.contract.address)?,
+            hop_two.position.unwrap().u128(),
+        )?;
+        send_excess_to = if order_one.position > order_two.position {
+            deps.api.human_address(&order_one.creator)?
+        } else {
+            deps.api.human_address(&order_two.creator)?
+        }
+    }
+
+    // unwrap is cool because `hops.len() == 2`
     let first_hop: Hop = hops.pop_front().unwrap();
     let route_state: RouteState = RouteState {
         current_hop: Some(first_hop.clone()),
@@ -711,6 +739,7 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
         borrow_token: first_hop.from_token.clone(),
         initiator: env.message.sender.clone(),
         minimum_acceptable_amount,
+        send_excess_to,
     };
     store_route_state(&mut deps.storage, &route_state)?;
     let mut msgs = vec![snip20::send_msg(
@@ -757,6 +786,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
             borrow_token,
             minimum_acceptable_amount,
             initiator,
+            send_excess_to,
         }) => {
             validate_human_addr(
                 &current_hop.unwrap().trade_smart_contract.address,
@@ -821,10 +851,10 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     }
                 }
 
-                // Send fee to initiator
+                // Send fee to send_excess_to
                 if amount.gt(&borrow_amount) {
                     messages.push(snip20::transfer_msg(
-                        initiator.clone(),
+                        send_excess_to.clone(),
                         (amount - borrow_amount).unwrap(),
                         None,
                         BLOCK_SIZE,
@@ -842,6 +872,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     borrow_token,
                     initiator,
                     minimum_acceptable_amount,
+                    send_excess_to,
                 },
             )?;
 
@@ -2170,6 +2201,7 @@ mod tests {
             borrow_token: mock_sscrt(),
             initiator: mock_contract().address,
             minimum_acceptable_amount: Some(Uint128(5)),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // ======== * it sends the execution fee to the route initiator
@@ -2304,6 +2336,7 @@ mod tests {
             borrow_amount: Uint128(1_000_000),
             initiator: mock_user_address(),
             minimum_acceptable_amount: None,
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // == when it isn't called by the contract
@@ -2338,6 +2371,7 @@ mod tests {
             borrow_amount: Uint128(1_000_000),
             initiator: mock_user_address(),
             minimum_acceptable_amount: None,
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // === * it raises an error
@@ -2359,6 +2393,7 @@ mod tests {
             borrow_amount: Uint128(1_000_000),
             initiator: mock_user_address(),
             minimum_acceptable_amount: None,
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
 
@@ -2378,6 +2413,7 @@ mod tests {
         let (_init_result, mut deps) = init_helper(true);
         let borrow_amount: Uint128 = Uint128(555);
         let mut hops: VecDeque<Hop> = VecDeque::new();
+        create_order_helper(&mut deps);
         let first_hop = Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
@@ -2416,12 +2452,12 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(Uint128(1)),
+            position: None,
         });
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(Uint128(1)),
+            position: None,
         });
         let handle_result = handle(
             &mut deps,
@@ -2457,7 +2493,9 @@ mod tests {
         // == * it stores the remaining hops
         hops.pop_front();
         assert_eq!(route_state.remaining_hops, hops);
-        // === when first hop is to limit order smart contract
+        // === when first hop is to limit order smart contract (second isn't)
+        // === * it stores the send_excess_to as the initiator
+        assert_eq!(route_state.send_excess_to, HumanAddr::from(MOCK_ADMIN));
         // === * it sends the token with the right message to the swap contract
         // === * it sends a message to finalize the contract
         assert_eq!(
@@ -2497,7 +2535,7 @@ mod tests {
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
-            position: Some(Uint128(1)),
+            position: Some(Uint128(0)),
         });
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
@@ -2539,6 +2577,49 @@ mod tests {
                 })
             ]
         );
+        // === when both hops are for limit orders
+        let receive_msg = ReceiveMsg::CreateOrder {
+            to_amount: Uint128(MOCK_AMOUNT),
+            to_token: mock_token().address,
+        };
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr::from("secretgary"),
+            from: HumanAddr::from("secretgary"),
+            amount: Uint128(MOCK_AMOUNT),
+            msg: Some(to_binary(&receive_msg).unwrap()),
+        };
+        handle(
+            &mut deps,
+            mock_env(mock_butt().address, &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        let mut hops: VecDeque<Hop> = VecDeque::new();
+        hops.push_back(Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(Uint128(0)),
+        });
+        hops.push_back(Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(Uint128(1)),
+        });
+        // === * it sets the send_excess_to on the route as the creator of the newest limit order
+        let handle_msg = HandleMsg::HandleFirstHop {
+            borrow_amount,
+            hops: hops.clone(),
+            minimum_acceptable_amount: Some(borrow_amount),
+        };
+        handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg.clone(),
+        )
+        .unwrap();
+        let route_state: RouteState = read_route_state(&deps.storage).unwrap().unwrap();
+        // === * it stores the send_excess_to as the initiator
+        assert_eq!(route_state.send_excess_to, HumanAddr::from("secretgary"));
     }
 
     #[test]
@@ -2586,6 +2667,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: Some(borrow_amount),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
 
@@ -2647,6 +2729,7 @@ mod tests {
                 borrow_amount,
                 initiator: mock_user_address(),
                 minimum_acceptable_amount: Some(borrow_amount),
+                send_excess_to: mock_contract().address,
             }
         );
 
@@ -2690,6 +2773,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: Some(borrow_amount),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
@@ -2742,6 +2826,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: Some(borrow_amount),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // ==== * it sends the amount received to the next hop trade smart contract with the correct details
@@ -2789,6 +2874,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: Some(minimum_acceptable_amount),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         // === when not called by the borrowed token
@@ -2851,6 +2937,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: None,
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
@@ -2876,6 +2963,7 @@ mod tests {
                 borrow_amount,
                 initiator: mock_user_address(),
                 minimum_acceptable_amount: None,
+                send_excess_to: mock_contract().address,
             }
         );
         // ==== * it does not send any messages
@@ -2893,6 +2981,7 @@ mod tests {
             borrow_amount,
             initiator: mock_user_address(),
             minimum_acceptable_amount: Some(borrow_amount),
+            send_excess_to: mock_contract().address,
         };
         store_route_state(&mut deps.storage, &route_state).unwrap();
         let handle_msg = HandleMsg::Receive {
@@ -2906,11 +2995,11 @@ mod tests {
             mock_env(borrow_token.address.clone(), &[]),
             handle_msg.clone(),
         );
-        // ==== * it sends the excess after paying the borrowed amount to the to address
+        // ==== * it sends the excess after paying the borrowed amount to the send_excess_to address
         assert_eq!(
             handle_result.unwrap().messages,
             vec![snip20::transfer_msg(
-                route_state.initiator,
+                route_state.send_excess_to,
                 Uint128(1),
                 None,
                 BLOCK_SIZE,

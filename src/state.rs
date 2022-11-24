@@ -134,6 +134,7 @@ pub struct RouteState {
     pub borrow_token: SecretContract,
     pub minimum_acceptable_amount: Option<Uint128>,
     pub initiator: HumanAddr,
+    pub send_excess_to: HumanAddr,
 }
 
 pub fn store_route_state<S: Storage>(storage: &mut S, data: &RouteState) -> StdResult<()> {
