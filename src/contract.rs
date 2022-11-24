@@ -851,7 +851,7 @@ fn handle_hop<S: Storage, A: Api, Q: Querier>(
                     }
                 }
 
-                // Send fee to send_excess_to
+                // Send excess
                 if amount.gt(&borrow_amount) {
                     messages.push(snip20::transfer_msg(
                         send_excess_to.clone(),
