@@ -698,8 +698,8 @@ fn handle_first_hop<S: Storage, A: Api, Q: Querier>(
     // 3. call FinalizeRoute to make sure everything went ok, otherwise revert the tx
     let config: Config = TypedStore::attach(&deps.storage).load(CONFIG_KEY).unwrap();
     authorize(config.addresses_allowed_to_fill, &env.message.sender)?;
-    if hops.len() < 2 {
-        return Err(StdError::generic_err("Route must be at least 2 hops."));
+    if hops.len() != 2 {
+        return Err(StdError::generic_err("Route must be 2 hops."));
     }
 
     // unwrap is cool because `hops.len() >= 2`
@@ -2410,14 +2410,30 @@ mod tests {
         );
         assert_eq!(
             handle_result.unwrap_err(),
-            StdError::generic_err("Route must be at least 2 hops.")
+            StdError::generic_err("Route must be 2 hops.")
         );
-        // == when there are 2 or more hops
+        // = when there are more than 2 hops
         hops.push_back(Hop {
             from_token: mock_butt(),
             trade_smart_contract: mock_contract(),
             position: Some(Uint128(1)),
         });
+        hops.push_back(Hop {
+            from_token: mock_butt(),
+            trade_smart_contract: mock_contract(),
+            position: Some(Uint128(1)),
+        });
+        let handle_result = handle(
+            &mut deps,
+            mock_env(HumanAddr::from(MOCK_ADMIN), &[]),
+            handle_msg.clone(),
+        );
+        assert_eq!(
+            handle_result.unwrap_err(),
+            StdError::generic_err("Route must be 2 hops.")
+        );
+        // == when there are 2 hops
+        hops.pop_back();
         let handle_msg = HandleMsg::HandleFirstHop {
             borrow_amount,
             hops: hops.clone(),
